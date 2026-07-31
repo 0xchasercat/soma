@@ -1,0 +1,56 @@
+{
+  "name": "soma",
+  "version": "0.2.0",
+  "description": "Deterministic behavioral synthesis, measurement, and capture primitives",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "build:ext": "bun build ext/src/capture.ts --outfile ext/dist/capture.js --target browser --minify && bun build ext/src/background.ts --outfile ext/dist/background.js --target browser --minify && bun build ext/src/popup/popup.ts --outfile ext/dist/popup.js --target browser --minify",
+    "train:model": "bun run model/src/train.ts",
+    "export:model": "bun run model/src/export_onnx.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "files": [
+    "dist",
+    "src",
+    "model/model.json",
+    "model/model.onnx",
+    "model/model.metrics.json",
+    "model/README.md",
+    "model/src",
+    "ext"
+  ],
+  "keywords": [
+    "behavioral-synthesis",
+    "human-emulation",
+    "mouse-movement",
+    "keystroke-dynamics",
+    "automation"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/chrome": "^0.1.32",
+    "@types/node": "^20.14.10",
+    "typescript": "^5.5.4"
+  },
+  "dependencies": {
+    "onnx-proto": "^8.0.1"
+  },
+  "peerDependencies": {
+    "onnxruntime-node": "^1.19.0"
+  },
+  "peerDependenciesMeta": {
+    "onnxruntime-node": {
+      "optional": true
+    }
+  }
+}

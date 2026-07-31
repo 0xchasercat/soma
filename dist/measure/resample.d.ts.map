@@ -1,0 +1,1 @@
+{"version":3,"file":"resample.d.ts","sourceRoot":"","sources":["../../src/measure/resample.ts"],"names":[],"mappings":"AAAA;;;;;GAKG;AAEH,OAAO,KAAK,EAAE,eAAe,EAAE,MAAM,aAAa,CAAC;AAEnD;;;;;GAKG;AACH,wBAAgB,YAAY,CAAC,IAAI,EAAE,eAAe,EAAE,GAAG,eAAe,EAAE,CA4BvE;AAED;;;;;;GAMG;AACH,wBAAgB,eAAe,CAAC,IAAI,EAAE,eAAe,EAAE,EAAE,WAAW,EAAE,MAAM,GAAG,eAAe,EAAE,CA+B/F"}

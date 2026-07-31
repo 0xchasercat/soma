@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "Soma Behavioral Capture",
+  "version": "0.2.0",
+  "description": "Local behavioral capture with credential exclusion and no printable key content.",
+  "minimum_chrome_version": "119",
+  "host_permissions": ["<all_urls>"],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["dist/capture.js"],
+      "run_at": "document_start",
+      "all_frames": true,
+      "match_about_blank": true,
+      "match_origin_as_fallback": true
+    }
+  ],
+  "background": {
+    "service_worker": "dist/background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Soma Behavioral Capture"
+  }
+}
