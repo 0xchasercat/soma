@@ -1,17 +1,18 @@
 {
   "schema": "soma.model-evaluation.v1",
   "featureSchema": "soma.motion-features.v2",
-  "modelSha256": "10c27b02e57cdef1ecd58b89731704f0b429f5a54941114d5caacff3c41f6ff1",
+  "modelSha256": "3b8d360155602bad676b0ab0b05165dc8e21618d1ce0a96f964bae89d68ba164",
   "captureSchemas": [
+    "soma.capture.v2",
     "soma.capture.v1"
   ],
   "captureFiles": [
-    "soma-capture-2026-08-01T04-41-10.json"
+    "soma-capture-2026-08-01T15-23-37.json"
   ],
   "legacyAttestation": {
     "flagProvided": true,
     "acceptedCaptureFiles": [
-      "soma-capture-2026-08-01T04-41-10.json"
+      "soma-capture-2026-08-01T15-23-37.json"
     ]
   },
   "seed": 42,
@@ -19,36 +20,36 @@
   "learningRate": 0.001,
   "batchSize": 32,
   "dataset": {
-    "capturedHuman": 2076,
+    "capturedHuman": 3694,
     "somaCalibration": 400,
-    "bot": 2076
+    "bot": 3694
   },
   "validation": {
-    "loss": 0.011861033663449169,
-    "accuracy": 0.9952,
-    "trueHuman": 306,
-    "falseBot": 2,
-    "falseHuman": 1,
-    "trueBot": 316
+    "loss": 0.031174470499624542,
+    "accuracy": 0.9895498392282959,
+    "trueHuman": 681,
+    "falseBot": 10,
+    "falseHuman": 3,
+    "trueBot": 550
   },
   "test": {
-    "loss": 0.06257683927387635,
-    "accuracy": 0.9841269841269841,
-    "trueHuman": 269,
-    "falseBot": 6,
-    "falseHuman": 3,
-    "trueBot": 289
+    "loss": 0.01674890513131489,
+    "accuracy": 0.9916279069767442,
+    "trueHuman": 534,
+    "falseBot": 7,
+    "falseHuman": 2,
+    "trueBot": 532
   },
   "selfConsistency": {
     "count": 100,
-    "meanBotScore": 1.1562400993391985e-7,
-    "maxBotScore": 0.0000024218405582807993,
+    "meanBotScore": 3.1152019400622663e-7,
+    "maxBotScore": 0.000012885627508641184,
     "botRate": 0
   },
   "negativeConsistency": {
     "count": 100,
-    "meanBotScore": 0.9999999473828808,
-    "maxBotScore": 0.9999999999975206,
+    "meanBotScore": 0.9999482055327968,
+    "maxBotScore": 0.999995857268863,
     "botRate": 1
   },
   "limitations": [
