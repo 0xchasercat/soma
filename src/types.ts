@@ -316,6 +316,8 @@ export interface RawInteraction {
   capturedAt: number;
   sourceSchema: 'soma.capture.v2';
   eventType: 'pointerdown' | 'pointerup' | 'click' | 'keydown' | 'keyup' | 'beforeinput' | 'input' | 'wheel' | 'focus';
+  /** Trusted high-level action used for flow cadence, absent on typing and wheel frames. */
+  actionKind?: 'pointer-click' | 'enter-submit';
   isTrusted: boolean;
   userActivation: boolean;
   pointerType: 'mouse' | 'touch' | 'pen' | 'none' | 'unknown';

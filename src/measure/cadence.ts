@@ -63,13 +63,11 @@ export function extractCapturedInteractionFeatures(
     .filter((event) => Number.isFinite(event.sinceNavigationMs))
     .slice()
     .sort((a, b) => a.sinceNavigationMs - b.sinceNavigationMs || a.capturedAt - b.capturedAt);
-  const actionEvents = ordered.filter((event) => event.isTrusted && (
-    event.eventType === 'click' || event.eventType === 'keydown' || event.eventType === 'wheel'
-  ));
+  const actionEvents = ordered.filter((event) => event.isTrusted && event.actionKind !== undefined);
   const boundary = Number.isFinite(consequentialActionAtMs)
     ? consequentialActionAtMs!
     : actionEvents.at(-1)?.sinceNavigationMs ?? Number.POSITIVE_INFINITY;
-  const priorActionCount = actionEvents.filter((event) => event.sinceNavigationMs < boundary).length;
+  const priorInteractionCount = ordered.filter((event) => event.sinceNavigationMs < boundary).length;
   const actionTimestamps = actionEvents.map((event) => event.sinceNavigationMs);
   const intervals = actionTimestamps.slice(1).map((timestamp, index) => timestamp - actionTimestamps[index]!);
   const latencies = actionEvents.flatMap((event) => Number.isFinite(event.actionLatencyMs) ? [event.actionLatencyMs!] : []);
@@ -82,7 +80,7 @@ export function extractCapturedInteractionFeatures(
       sequence: ordered.map((event) => event.eventType),
     },
     interaction: {
-      count: priorActionCount,
+      count: priorInteractionCount,
       ...extractCadenceFeatures(actionTimestamps, intervals, latencies),
     },
   };

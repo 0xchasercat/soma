@@ -23,9 +23,17 @@ import type { TrajectoryPoint } from '../types.js';
 export function classifyVelocityProfile(speeds: number[]): 'bell' | 'linear' | 'flat' | 'unknown' {
   const finite = speeds.map((value) => (Number.isFinite(value) ? Math.max(0, value) : 0));
   if (finite.length < 5) return 'unknown';
-  const maxSpeed = Math.max(...finite);
+  // Browser mousemove delivery is not frame-regular; classify the envelope
+  // after a short moving average so event-rate jitter is not mistaken for
+  // neuromotor shape. The raw speeds remain available to the fit below.
+  const smoothed = finite.map((_, index) => {
+    const start = Math.max(0, index - 2);
+    const end = Math.min(finite.length, index + 3);
+    return finite.slice(start, end).reduce((sum, value) => sum + value, 0) / (end - start);
+  });
+  const maxSpeed = Math.max(...smoothed);
   if (!(maxSpeed > 1e-6)) return 'flat';
-  const normalized = finite.map((value) => value / maxSpeed);
+  const normalized = smoothed.map((value) => value / maxSpeed);
   const peakIdx = normalized.indexOf(1);
   const peakPos = peakIdx / (normalized.length - 1);
   let rises = 0;
