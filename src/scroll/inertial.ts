@@ -18,7 +18,11 @@ import type { RNG } from '../rng.js';
 /** Friction decay time constant (ms). */
 const DECAY_TAU_MS = 350;
 
-/** Target peak momentum range for a real inertial flick (px). */
+/**
+ * Target peak momentum range for a real inertial flick (px), from grimoire
+ * captures: M4 trackpad peaked 254/258, iPhone touch 202. A peak below ~120
+ * is the validated mochi defect (behav.scroll_peak_momentum_too_weak).
+ */
 const PEAK_DELTA_MIN = 180;
 const PEAK_DELTA_MAX = 280;
 
@@ -31,7 +35,10 @@ export function generateInertialCurve(targetDistance: number, rng: RNG): number[
   const distance = Math.abs(targetDistance);
   const sign = targetDistance < 0 ? -1 : 1;
   if (distance < PEAK_DELTA_MIN) {
-    const frameCount = Math.max(1, Math.ceil(distance / 40));
+    // Short gestures: smooth quadratic easing with denser frames to match real
+    // input event rates. Grimoire captures show wheel gestures at ~30-40 evt/s,
+    // not 2-3 total frames. Use at least 6 frames even for tiny distances.
+    const frameCount = Math.max(6, Math.ceil(distance / 25));
     const magnitudes: number[] = [];
     let accumulated = 0;
     for (let i = 0; i < frameCount; i++) {

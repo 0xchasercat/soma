@@ -1,55 +1,55 @@
 {
   "schema": "soma.model-evaluation.v1",
   "featureSchema": "soma.motion-features.v2",
-  "modelSha256": "3b8d360155602bad676b0ab0b05165dc8e21618d1ce0a96f964bae89d68ba164",
+  "modelSha256": "bb4be976f3f7cbe0093d80823f4089506e30bcfa22b2322b5070b360c66cb8ad",
   "captureSchemas": [
     "soma.capture.v2",
     "soma.capture.v1"
   ],
   "captureFiles": [
-    "soma-capture-2026-08-01T15-23-37.json"
+    "soma-capture-2026-08-04T13-56-13.json"
   ],
   "legacyAttestation": {
     "flagProvided": true,
     "acceptedCaptureFiles": [
-      "soma-capture-2026-08-01T15-23-37.json"
+      "soma-capture-2026-08-04T13-56-13.json"
     ]
   },
   "seed": 42,
-  "epochs": 100,
-  "learningRate": 0.001,
-  "batchSize": 32,
+  "epochs": 300,
+  "learningRate": 0.0002,
+  "batchSize": 8,
   "dataset": {
-    "capturedHuman": 3694,
+    "capturedHuman": 23768,
     "somaCalibration": 400,
-    "bot": 3694
+    "bot": 23768
   },
   "validation": {
-    "loss": 0.031174470499624542,
-    "accuracy": 0.9895498392282959,
-    "trueHuman": 681,
-    "falseBot": 10,
-    "falseHuman": 3,
-    "trueBot": 550
+    "loss": 0.007390561538163817,
+    "accuracy": 0.9977785182716872,
+    "trueHuman": 5368,
+    "falseBot": 14,
+    "falseHuman": 6,
+    "trueBot": 3615
   },
   "test": {
-    "loss": 0.01674890513131489,
-    "accuracy": 0.9916279069767442,
-    "trueHuman": 534,
-    "falseBot": 7,
+    "loss": 0.008923167198666824,
+    "accuracy": 0.9979347377116894,
+    "trueHuman": 6091,
+    "falseBot": 18,
     "falseHuman": 2,
-    "trueBot": 532
+    "trueBot": 3573
   },
   "selfConsistency": {
     "count": 100,
-    "meanBotScore": 3.1152019400622663e-7,
-    "maxBotScore": 0.000012885627508641184,
+    "meanBotScore": 0.00015461854144715082,
+    "maxBotScore": 0.013376666557936097,
     "botRate": 0
   },
   "negativeConsistency": {
     "count": 100,
-    "meanBotScore": 0.9999482055327968,
-    "maxBotScore": 0.999995857268863,
+    "meanBotScore": 0.9999990913511411,
+    "maxBotScore": 0.9999999949696099,
     "botRate": 1
   },
   "limitations": [

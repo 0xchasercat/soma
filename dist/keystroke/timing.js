@@ -31,14 +31,14 @@ export function synthesizeTiming(keys, profile, rng) {
             const prevKey = keys[i - 1];
             const dgClass = classifyDigraph(prevKey, key);
             const params = FLIGHT_TIME_PARAMS[dgClass];
-            flightMs = Math.max(10, rng.nextLognormal(params.mu, params.sigma) * speedMult);
+            flightMs = Math.max(32, rng.nextLognormal(params.mu, params.sigma) * speedMult);
         }
         if (key === 'Backspace' && i > 0) {
             flightMs = rng.nextRange(200, 500);
             pauseAfterMs = rng.nextRange(100, 300);
         }
         else if (i > 0 && keys[i - 1] === 'Backspace') {
-            flightMs = Math.max(10, flightMs);
+            flightMs = Math.max(32, flightMs);
         }
         timings.push({ key, holdMs, flightMs, ...(pauseAfterMs === undefined ? {} : { pauseAfterMs }) });
     }

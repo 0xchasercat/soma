@@ -63,7 +63,12 @@ export function extractCapturedInteractionFeatures(
     .filter((event) => Number.isFinite(event.sinceNavigationMs))
     .slice()
     .sort((a, b) => a.sinceNavigationMs - b.sinceNavigationMs || a.capturedAt - b.capturedAt);
-  const actionEvents = ordered.filter((event) => event.isTrusted && event.actionKind !== undefined);
+  // A terminal action is identified by whichever marker its producer emits: the harness
+  // recorder tags actionKind, while the browser extension only derives actionLatencyMs
+  // from its readiness map. Requiring actionKind alone collapses every extension-captured
+  // session to zero actions, which is why real captures measured no cadence at all.
+  const actionEvents = ordered.filter((event) => event.isTrusted &&
+    (event.actionKind !== undefined || Number.isFinite(event.actionLatencyMs)));
   const boundary = Number.isFinite(consequentialActionAtMs)
     ? consequentialActionAtMs!
     : actionEvents.at(-1)?.sinceNavigationMs ?? Number.POSITIVE_INFINITY;

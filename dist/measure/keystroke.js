@@ -61,27 +61,30 @@ function computeCapturedDigraphVariance(classes, flightTimes) {
     return varianceOfClassMeans(groups);
 }
 /**
- * Compute Kolmogorov-Smirnov distance between empirical CDF and reference CDF.
+ * Compute Kolmogorov-Smirnov distance between empirical CDF and a speed-scaled reference CDF.
  *
- * For simplicity, use a synthetic human reference CDF (mixture of lognormals
- * weighted by typical digraph frequencies).
+ * The reference CDF is a lognormal whose median matches the expected median flight time
+ * for the observed data. This makes the metric speed-invariant: a careful typist (wpm=40)
+ * and a fast typist (wpm=100) both produce human-shaped timing distributions, just with
+ * different scales.
+ *
+ * We infer the scale from the empirical median FT, then compare shape (variance, tail weight).
  */
 function computeCDFDistance(flightTimes) {
     if (flightTimes.length < 5)
-        return 1; // no data → max distance
-    // Sort FTs to build empirical CDF.
+        return 1;
     const sorted = [...flightTimes].sort((a, b) => a - b);
     const n = sorted.length;
-    // Reference CDF: approximate human FT distribution as lognormal(μ=5.0, σ=0.5).
-    // This is a simplified reference; ideally loaded from real captures.
-    const refMu = 5.0;
+    const empiricalMedian = sorted[Math.floor(n / 2)];
+    // Infer the lognormal mu from the empirical median: median = exp(mu), so mu = ln(median).
+    // Use a reference sigma of 0.5 (moderate spread), typical for human digraph timing.
+    const refMu = Math.log(Math.max(1, empiricalMedian));
     const refSigma = 0.5;
     // KS statistic: max |F_empirical(x) - F_reference(x)|.
     let maxDist = 0;
     for (let i = 0; i < n; i++) {
         const x = sorted[i];
         const empiricalCDF = (i + 1) / n;
-        // Reference CDF: Φ((ln(x) - μ) / σ) where Φ is standard normal CDF.
         const z = (Math.log(Math.max(1, x)) - refMu) / refSigma;
         const referenceCDF = 0.5 * (1 + erf(z / Math.sqrt(2)));
         const dist = Math.abs(empiricalCDF - referenceCDF);

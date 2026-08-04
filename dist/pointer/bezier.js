@@ -54,14 +54,24 @@ export function generateBezier(start, end, sampleCount, rng) {
     const fwdY = dy / dist;
     const perpX = -fwdY;
     const perpY = fwdX;
+    // Off-axis control-point placement. A human reach is never a straight line: the
+    // hand leaves the start axis and re-converges. Sampling the perpendicular offset
+    // symmetrically about zero lets a draw land arbitrarily close to zero, producing a
+    // near-straight path whose measured curvature falls under the detector floor
+    // (grimoire behav.linear_or_teleport_motion, rule_in: curvature < human_min).
+    // Draw a MAGNITUDE bounded away from zero, then an independent sign, so every
+    // gesture carries real bow while the direction stays unbiased.
+    const bowSign = rng.next() < 0.5 ? -1 : 1;
     const p1OffsetFactor = rng.nextRange(0.3, 0.5);
-    const p1PerpFactor = rng.nextRange(-0.4, 0.4);
+    const p1PerpFactor = bowSign * rng.nextRange(0.12, 0.45);
     const p1 = {
         x: sx + fwdX * dist * p1OffsetFactor + perpX * dist * p1PerpFactor,
         y: sy + fwdY * dist * p1OffsetFactor + perpY * dist * p1PerpFactor,
     };
+    // P2 bows the same way with a smaller magnitude: the corrective phase pulls back
+    // toward the target rather than reversing across the axis.
     const p2OffsetFactor = rng.nextRange(0.2, 0.4);
-    const p2PerpFactor = rng.nextRange(-0.2, 0.2);
+    const p2PerpFactor = bowSign * rng.nextRange(0.06, 0.25);
     const p2 = {
         x: ex - fwdX * dist * p2OffsetFactor + perpX * dist * p2PerpFactor,
         y: ey - fwdY * dist * p2OffsetFactor + perpY * dist * p2PerpFactor,

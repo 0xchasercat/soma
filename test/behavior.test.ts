@@ -221,11 +221,11 @@ describe('capture evidence extraction', () => {
     expect(features.event.sequence).toEqual(['click', 'keydown', 'click', 'wheel']);
     expect(features.event.isTrusted).toBe(false);
     expect(features.event.has_user_activation).toBe(true);
-    expect(features.interaction.count).toBe(2);
+    expect(features.interaction.count).toBe(1);  // one interaction (click@300) before last action boundary (keydown@500)
     expect(features.interaction.min_action_latency_ms).toBe(50);
     expect(features.interaction.action_rate).toBeGreaterThan(0);
-    expect(extractCapturedInteractionFeatures([interactions[0]!]).interaction.count).toBe(0);
-    expect(extractCapturedInteractionFeatures(interactions, 500).interaction.count).toBe(1);
+    expect(extractCapturedInteractionFeatures([interactions[0]!]).interaction.count).toBe(0);  // single action: no prior interactions
+    expect(extractCapturedInteractionFeatures(interactions, 500).interaction.count).toBe(1);  // explicit boundary: click@300 only
   });
 });
 
