@@ -1,7 +1,7 @@
 {
   "schema": "soma.model-evaluation.v1",
   "featureSchema": "soma.motion-features.v2",
-  "modelSha256": "bb4be976f3f7cbe0093d80823f4089506e30bcfa22b2322b5070b360c66cb8ad",
+  "modelSha256": "d920abadb1dd8e6dd3a35408672e2401e1edda15ca35ae75e4214db8c8fa4d9b",
   "captureSchemas": [
     "soma.capture.v2",
     "soma.capture.v1"
@@ -16,45 +16,55 @@
     ]
   },
   "seed": 42,
-  "epochs": 300,
-  "learningRate": 0.0002,
-  "batchSize": 8,
+  "epochs": 30,
+  "learningRate": 0.0006,
+  "batchSize": 64,
   "dataset": {
-    "capturedHuman": 23768,
-    "somaCalibration": 400,
-    "bot": 23768
+    "capturedHuman": 23252,
+    "easyNegatives": 23252,
+    "hardNegatives": 23227,
+    "somaInTraining": false
   },
   "validation": {
-    "loss": 0.007390561538163817,
-    "accuracy": 0.9977785182716872,
-    "trueHuman": 5368,
-    "falseBot": 14,
-    "falseHuman": 6,
-    "trueBot": 3615
+    "loss": 0.03784442680433616,
+    "accuracy": 0.9875968992248062,
+    "trueHuman": 3197,
+    "falseBot": 69,
+    "falseHuman": 59,
+    "trueBot": 6995
   },
   "test": {
-    "loss": 0.008923167198666824,
-    "accuracy": 0.9979347377116894,
-    "trueHuman": 6091,
-    "falseBot": 18,
-    "falseHuman": 2,
-    "trueBot": 3573
+    "loss": 0.03663615828544118,
+    "accuracy": 0.9888785912882299,
+    "trueHuman": 2753,
+    "falseBot": 66,
+    "falseHuman": 42,
+    "trueBot": 6850
   },
-  "selfConsistency": {
-    "count": 100,
-    "meanBotScore": 0.00015461854144715082,
-    "maxBotScore": 0.013376666557936097,
-    "botRate": 0
+  "humanReference": {
+    "count": 2819,
+    "meanBotScore": 0.03169303348717913,
+    "maxBotScore": 0.9999425161235717,
+    "botRate": 0.023412557644554806
   },
+  "somaProbe": {
+    "count": 400,
+    "meanBotScore": 0.035843114825385367,
+    "maxBotScore": 0.7112182337922942,
+    "botRate": 0.02
+  },
+  "somaHumanMeanRatio": 1.1309461696017542,
   "negativeConsistency": {
     "count": 100,
-    "meanBotScore": 0.9999990913511411,
-    "maxBotScore": 0.9999999949696099,
+    "meanBotScore": 0.9999994838935823,
+    "maxBotScore": 0.9999996769760033,
     "botRate": 1
   },
   "limitations": [
     "Human data represents one operator and is not population-level ground truth.",
-    "Soma calibration paths are training-only compatibility examples, not observed human data.",
-    "Synthetic test groups use the same generator families as training groups."
+    "Soma is excluded from training and scored as a held-out probe; its bot-rate is compared against held-out real humans rather than an absolute floor.",
+    "Hard negatives are faithful reimplementations of published library algorithms, not the vendored libraries themselves.",
+    "Synthetic test groups use the same generator families as training groups.",
+    "Pointer-only: the 12 features are trajectory geometry. Keystroke and scroll evidence are gated separately and are not model inputs."
   ]
 }

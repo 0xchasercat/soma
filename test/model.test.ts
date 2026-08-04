@@ -57,25 +57,39 @@ describe('model artifacts and capture cohorts', () => {
   test('gates legacy records and preserves each capture schema', () => {
     const v1 = capture('soma.capture.v1', undefined, 'soma.capture.v1');
     const v2 = capture('soma.capture.v2', true, 'soma.capture.v2');
+    // A wholly-v1 export still requires attestation at the capture level.
     expect(() => buildDataset(v1)).toThrow('explicit allowLegacy');
     expect(() => buildDataset(capture('soma.capture.v2'))).toThrow('no usable movements');
 
     const forwardDataset = buildDataset([v1, v2], { allowLegacy: true });
     const forwardSources = forwardDataset
-      .filter((sample) => sample.label === 0 && sample.calibration !== true)
+      .filter((sample) => sample.label === 0)
       .map((sample) => sample.source)
       .sort();
     const reverseSources = buildDataset([v2, v1], 42, { allowLegacy: true })
-      .filter((sample) => sample.label === 0 && sample.calibration !== true)
+      .filter((sample) => sample.label === 0)
       .map((sample) => sample.source)
       .sort();
     expect(forwardSources).toEqual(['human-v1-attested', 'human-v2-trusted']);
     expect(reverseSources).toEqual(forwardSources);
-    expect(forwardDataset.filter((sample) => sample.calibration === true).length).toBeGreaterThanOrEqual(100);
 
+    // Soma's own output must never enter the dataset: training on it as label 0 made
+    // the model's verdict on Soma circular. It is scored as a held-out probe instead.
+    expect(forwardDataset.some((sample) => sample.source === 'soma-calibration')).toBe(false);
+    expect(forwardDataset.some((sample) => sample.calibration === true)).toBe(false);
+
+    // Hard negatives (the humanization libraries) must be present and labeled machine.
+    const hardSources = [...new Set(forwardDataset
+      .filter((sample) => sample.groupId.startsWith('hard-'))
+      .map((sample) => sample.source))].sort();
+    expect(hardSources).toEqual(['bezmouse', 'ghost_cursor', 'human_cursor']);
+    expect(forwardDataset.filter((sample) => sample.groupId.startsWith('hard-')).every((sample) => sample.label === 1)).toBe(true);
+
+    // A v2 export carrying individual v1-era movement records skips them without
+    // attestation rather than aborting, so a mixed export remains usable.
     const migratedV1 = capture('soma.capture.v2', undefined, 'soma.capture.v1');
-    expect(() => buildDataset(migratedV1)).toThrow('explicit allowLegacy');
-    expect(buildDataset(migratedV1, { allowLegacy: true }).find((sample) => sample.label === 0 && sample.calibration !== true)?.source)
+    expect(() => buildDataset(migratedV1)).toThrow('no usable movements');
+    expect(buildDataset(migratedV1, { allowLegacy: true }).find((sample) => sample.label === 0)?.source)
       .toBe('human-v1-attested');
   });
   test('uses path-only features and JSON then ONNX then heuristic scoring', async () => {
@@ -129,17 +143,26 @@ describe('model artifacts and capture cohorts', () => {
       schema: string;
       featureSchema: string;
       captureFiles: string[];
-      dataset: { capturedHuman: number; somaCalibration: number; bot: number };
-      selfConsistency: { botRate: number; count: number };
+      dataset: { capturedHuman: number; easyNegatives: number; hardNegatives: number; somaInTraining: boolean };
+      humanReference: { botRate: number; count: number; meanBotScore: number };
+      somaProbe: { botRate: number; count: number; meanBotScore: number };
       negativeConsistency: { botRate: number; count: number };
       test: { accuracy: number };
     };
     expect(metrics.schema).toBe('soma.model-evaluation.v1');
     expect(metrics.featureSchema).toBe('soma.motion-features.v2');
     expect(metrics.captureFiles.every((path) => !path.includes('/') && !path.includes('\\'))).toBe(true);
-    expect(metrics.dataset.somaCalibration).toBeGreaterThan(0);
-    expect(metrics.selfConsistency.count).toBe(100);
-    expect(metrics.selfConsistency.botRate).toBeLessThanOrEqual(0.05);
+
+    // Soma must be absent from training, so its probe score is a measurement rather
+    // than a consequence of having been labeled human.
+    expect(metrics.dataset.somaInTraining).toBe(false);
+    expect(metrics.dataset.hardNegatives).toBeGreaterThan(0);
+    expect(metrics.dataset.capturedHuman).toBeGreaterThan(0);
+
+    // The acceptance criterion is relative: Soma is compared against held-out real
+    // humans scored by the same model, not against an absolute floor.
+    expect(metrics.humanReference.count).toBeGreaterThanOrEqual(100);
+    expect(metrics.somaProbe.botRate).toBeLessThanOrEqual(Math.max(0.05, metrics.humanReference.botRate * 2.5));
     expect(metrics.negativeConsistency.count).toBe(100);
     expect(metrics.negativeConsistency.botRate).toBeGreaterThanOrEqual(0.95);
     expect(await loadJSONModel('model/model.json')).toBe(true);

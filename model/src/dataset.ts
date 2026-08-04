@@ -3,7 +3,7 @@
 import type { CaptureExport, LabeledSample, TrajectoryPoint } from '../../src/types.js';
 import { extractFeatureVector } from './features.js';
 import { RNG } from '../../src/rng.js';
-import { synthesizeMovement } from '../../src/pointer/trajectory.js';
+import { HARD_NEGATIVE_GENERATORS } from './hard-negatives.js';
 
 export type TrainingSample = LabeledSample & { groupId: string; calibration?: true };
 
@@ -15,6 +15,31 @@ export interface BuildDatasetOptions {
 
 function finite(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
+}
+
+/**
+ * Trailing samples where the cursor has stopped moving.
+ *
+ * The extension appends the click position after motion ends, so 99.4% of real captured
+ * trajectories finish with at least one duplicate position. That makes the final-frame
+ * speed exactly zero, and `extractFeatureVector` feature 8 (finalSpeedRatio) therefore
+ * reads ~0 for 99.6% of real trajectories while every generator terminates with residual
+ * velocity. A single threshold on that one feature separated real from synthetic at
+ * 99.9% — the model was detecting the CAPTURE PIPELINE, not the motion, which is why
+ * training hit 100% validation accuracy within one epoch.
+ *
+ * Trimming the stationary tail puts both classes on the same convention so the features
+ * describe movement rather than provenance.
+ */
+function trimStationaryTail(path: TrajectoryPoint[]): TrajectoryPoint[] {
+  let end = path.length;
+  while (end > 2) {
+    const last = path[end - 1]!;
+    const previous = path[end - 2]!;
+    if (last.x !== previous.x || last.y !== previous.y) break;
+    end--;
+  }
+  return end === path.length ? path : path.slice(0, end);
 }
 
 function normalizedTrajectory(path: unknown, legacy: boolean): TrajectoryPoint[] | null {
@@ -33,7 +58,7 @@ function normalizedTrajectory(path: unknown, legacy: boolean): TrajectoryPoint[]
       if (clean[index]!.tMs - clean[index - 1]!.tMs > 250) start = index;
     }
   }
-  const burst = clean.slice(start);
+  const burst = trimStationaryTail(clean.slice(start));
   if (burst.length < 10) return null;
   const origin = burst[0]!.tMs;
   const normalized = burst.map((point) => ({ x: point.x, y: point.y, tMs: point.tMs - origin }));
@@ -131,28 +156,13 @@ function generateRandomWaypoints(
   return path;
 }
 
-function generateSomaCalibration(seed: number, count: number): TrainingSample[] {
-  const rng = new RNG(seed ^ 0x51a7cafe);
-  const samples: TrainingSample[] = [];
-  for (let index = 0; index < count; index++) {
-    const start = { x: rng.nextRange(20, 900), y: rng.nextRange(20, 650) };
-    const target = {
-      x: rng.nextRange(20, 900),
-      y: rng.nextRange(20, 650),
-      width: rng.nextRange(24, 180),
-      height: rng.nextRange(20, 90),
-    };
-    const plan = synthesizeMovement(start, target, undefined, seed + 100_000 + index);
-    samples.push({
-      features: extractFeatureVector(plan.points),
-      label: 0,
-      source: 'soma-calibration',
-      groupId: `soma-calibration-${Math.floor(index / 20)}`,
-      calibration: true,
-    });
-  }
-  return samples;
-}
+// Soma's own output is deliberately NOT part of this dataset. It was previously
+// injected as label 0 (human) into the training split, which made the model's verdict
+// on Soma circular: the scorer was taught that Soma is human, then used downstream as
+// evidence that Soma is human. It also dragged the human boundary toward Soma's
+// distribution, which is why real captured humans scored as substantially bot-like.
+// Soma is now evaluated only as a held-out probe (see evaluateSomaPlans in train.ts),
+// so "Soma scores as human" is a measurement rather than a construction.
 
 /** Build deterministic human and synthetic samples, retaining session groups. */
 export function buildDataset(
@@ -180,9 +190,11 @@ export function buildDataset(
         throw new Error(`Unsupported movement sourceSchema: ${String(sourceSchema)}`);
       }
       const legacy = capture.schema === 'soma.capture.v1' || sourceSchema === 'soma.capture.v1';
-      if (legacy && !allowLegacy) {
-        throw new Error('Legacy v1 capture requires explicit allowLegacy operator attestation');
-      }
+      // A v2 export can still carry individual v1-era movement records. Those lack the
+      // trustedEvents provenance marker, so without an explicit legacy attestation they
+      // are SKIPPED rather than aborting the run: dropping unattested records is the
+      // conservative reading, and a mixed export is otherwise unusable.
+      if (legacy && !allowLegacy) continue;
       if (!legacy && movement.trustedEvents !== true) continue;
       const trajectory = normalizedTrajectory(movement.trajectory, legacy);
       if (!trajectory) continue;
@@ -200,8 +212,21 @@ export function buildDataset(
   }
 
   const capturedHumanCount = samples.length;
-  const syntheticCount = Math.max(capturedHumanCount, 100);
-  for (let i = 0; i < syntheticCount; i++) {
+
+  // Negative classes. Two tiers, both labeled 1 (machine):
+  //
+  //   EASY  — straight line, constant velocity, white noise, naive ease, random
+  //           waypoints. Separable on curvature or tremor alone.
+  //   HARD  — faithful reimplementations of the humanization libraries a real
+  //           detector is trained against (ghost-cursor, bezmouse, HumanCursor).
+  //           These already carry Bezier curvature, Fitts-like duration, and
+  //           jitter, so they sit near the actual decision boundary.
+  //
+  // Training on easy negatives alone yields a model that separates them at ~99.8%
+  // while scoring real humans as substantially bot-like: it learns "not-easy-synth"
+  // rather than "human". The hard tier is what forces the boundary to the right place.
+  const easyCount = Math.max(capturedHumanCount, 100);
+  for (let i = 0; i < easyCount; i++) {
     const start = { x: rng.nextRange(100, 500), y: rng.nextRange(100, 500) };
     const end = { x: rng.nextRange(100, 800), y: rng.nextRange(100, 600) };
     const synthType = rng.nextInt(5);
@@ -232,8 +257,23 @@ export function buildDataset(
     });
   }
 
-  const calibrationCount = Math.min(400, Math.max(100, Math.ceil(Math.sqrt(capturedHumanCount) * 10)));
-  samples.push(...generateSomaCalibration(seed, calibrationCount));
+  // Hard negatives, sized to match the human class so the boundary is not dominated
+  // by the trivially separable tier. Each library gets its own groupId namespace so
+  // the group-disjoint split cannot leak one library between train and test.
+  const hardPerLibrary = Math.ceil(Math.max(capturedHumanCount, 100) / HARD_NEGATIVE_GENERATORS.length);
+  for (const { source, generate } of HARD_NEGATIVE_GENERATORS) {
+    for (let i = 0; i < hardPerLibrary; i++) {
+      const start = { x: rng.nextRange(20, 1500), y: rng.nextRange(20, 900) };
+      const end = { x: rng.nextRange(20, 1500), y: rng.nextRange(20, 900) };
+      if (Math.hypot(end.x - start.x, end.y - start.y) < 20) continue;
+      samples.push({
+        features: extractFeatureVector(generate(start, end, rng)),
+        label: 1,
+        source,
+        groupId: `hard-${source}-${Math.floor(i / 20)}`,
+      });
+    }
+  }
 
   for (let i = samples.length - 1; i > 0; i--) {
     const j = rng.nextInt(i + 1);

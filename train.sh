@@ -1,0 +1,1 @@
+bun run train:model -- ~/soma-capture-2026-08-04T13-56-13.json --allow-legacy --epochs 30 --lr 0.0006 --batch 64 --seed 42 --out model/model.json --metrics model/model.metrics.json

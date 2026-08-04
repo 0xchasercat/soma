@@ -12,7 +12,7 @@ export { DEFAULT_PROFILE, PROFILES, mergeProfile, clampProfile } from './profile
 export { synthesizeMovement, synthesizeClick } from './pointer/trajectory.js';
 export { synthesizeKeystrokes } from './keystroke/plan.js';
 export { synthesizeScroll } from './scroll/plan.js';
-export { generateDwell, generatePostActionSettle, generateInterActionInterval } from './cadence/timing.js';
+export { generateDwell, generatePostActionSettle, generateInterActionInterval, generatePageReadDwell } from './cadence/timing.js';
 // ─── Measurement ─────────────────────────────────────────────────────────────
 export { measureTrajectory, resample60Hz, computeCurvature, countSubmovements, extractSpeeds, classifyVelocityProfile, fitSigmaLognormal, measureTremor, extractKeystrokeFeatures, extractCapturedKeystrokeFeatures, extractCadenceFeatures, extractCapturedInteractionFeatures, } from './measure/index.js';
 // ─── Scoring ─────────────────────────────────────────────────────────────────
