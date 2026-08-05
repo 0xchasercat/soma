@@ -270,12 +270,50 @@ export async function storeData(storeName: StoreName, data: unknown): Promise<vo
   await withTransaction(database, storeName, 'readwrite', (store) => store.add(record));
 }
 
-export async function getAllData(): Promise<CaptureStores> {
+/**
+ * Read one store in batches via a cursor.
+ *
+ * `getAll()` materializes every record of every store at once, which for a
+ * multi-10k-gesture capture is both a large heap spike and the precursor to a
+ * single oversized JSON string. Streaming lets the caller serialize and release
+ * each batch, so peak memory stays proportional to `batchSize`, not to the
+ * capture.
+ *
+ * @param storeName  Store to read.
+ * @param batchSize  Records handed to `onBatch` at a time.
+ * @param onBatch    Receives each batch in key order.
+ */
+export async function streamStore(
+  storeName: StoreName,
+  batchSize: number,
+  onBatch: (batch: unknown[]) => void,
+): Promise<void> {
   const database = await openDB();
-  const [movements, keystrokes, scrolls, interactions] = await Promise.all(STORE_NAMES.map((storeName) => (
-    withTransaction(database, storeName, 'readonly', (store) => store.getAll())
-  )));
-  return { movements, keystrokes, scrolls, interactions };
+  await new Promise<void>((resolve, reject) => {
+    let batch: unknown[] = [];
+    try {
+      const transaction = database.transaction(storeName, 'readonly');
+      const request = transaction.objectStore(storeName).openCursor();
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (cursor) {
+          batch.push(cursor.value);
+          if (batch.length >= batchSize) {
+            onBatch(batch);
+            batch = [];
+          }
+          cursor.continue();
+          return;
+        }
+        if (batch.length > 0) onBatch(batch);
+      };
+      request.onerror = () => reject(request.error);
+      transaction.oncomplete = () => resolve();
+      transaction.onabort = () => reject(transaction.error ?? new Error('IndexedDB transaction aborted'));
+    } catch (error) {
+      reject(error);
+    }
+  });
 }
 
 /** Counts only — safe for popup stats when the capture set exceeds the runtime message size limit. */

@@ -1,4 +1,5 @@
 import { synthesizeClick, synthesizeMovement } from './pointer/trajectory.js';
+import { synthesizeClickFlow, synthesizeMovementFlow } from './pointer/flow-synthesis.js';
 export const systemDelay = async (milliseconds) => {
     if (!Number.isFinite(milliseconds) || milliseconds <= 0)
         return;
@@ -43,40 +44,67 @@ export async function dispatchScrollPlan(plan, driver, delay = systemDelay) {
 /**
  * Stateful pointer convenience wrapper. `click()` refuses to dispatch a click
  * when the live endpoint no longer resolves to an interactive element.
+ *
+ * Pass `flowModel` to use the trained normalizing-flow synthesizer for all
+ * pointer movements. When omitted the parametric Bezier path is used, which
+ * is the safe default for environments that have not loaded the flow ONNX.
  */
 export class HumanPointer {
     driver;
     profile;
     delay;
+    flowModel;
     position;
-    constructor(driver, initialPosition, profile, delay = systemDelay) {
+    constructor(driver, initialPosition, profile, delay = systemDelay, flowModel) {
         this.driver = driver;
         this.profile = profile;
         this.delay = delay;
+        this.flowModel = flowModel;
         this.position = { ...initialPosition };
     }
     get currentPosition() {
         return { ...this.position };
     }
     async moveTo(target, seed) {
-        const plan = synthesizeMovement(this.position, target, this.profile, seed);
+        const plan = this.flowModel
+            ? await synthesizeMovementFlow(this.flowModel, this.position, target, this.profile, seed)
+            : synthesizeMovement(this.position, target, this.profile, seed);
         await dispatchTrajectory(plan, this.driver, this.delay);
         this.position = { ...plan.endpoint };
         return plan;
     }
     async click(target, seed) {
-        const click = synthesizeClick(this.position, target, this.profile, seed);
-        await dispatchTrajectory(click.trajectory, this.driver, this.delay);
-        this.position = { ...click.trajectory.endpoint };
-        await this.delay(click.postArrivalSettleMs);
+        let trajectory;
+        let settleMs;
+        let holdMs;
+        if (this.flowModel) {
+            const click = await synthesizeClickFlow(this.flowModel, this.position, target, this.profile, seed);
+            trajectory = click.trajectory;
+            settleMs = click.settleMs;
+            holdMs = click.holdMs;
+        }
+        else {
+            const click = synthesizeClick(this.position, target, this.profile, seed);
+            trajectory = click.trajectory;
+            settleMs = click.postArrivalSettleMs;
+            holdMs = click.clickHoldMs;
+        }
+        await dispatchTrajectory(trajectory, this.driver, this.delay);
+        this.position = { ...trajectory.endpoint };
+        await this.delay(settleMs);
         const interactive = await this.driver.isInteractiveAt(this.position.x, this.position.y);
         if (!interactive) {
             throw new Error('Refusing click: live endpoint is not interactive');
         }
         await this.driver.down();
-        await this.delay(click.clickHoldMs);
+        await this.delay(holdMs);
         await this.driver.up();
-        return { ...click, clickTargetIsInteractive: true };
+        return {
+            trajectory,
+            postArrivalSettleMs: settleMs,
+            clickHoldMs: holdMs,
+            clickTargetIsInteractive: true,
+        };
     }
 }
 //# sourceMappingURL=dispatch.js.map

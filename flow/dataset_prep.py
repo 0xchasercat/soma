@@ -64,11 +64,21 @@ import torch
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-N_STEPS = 128  # spatial deltas per gesture (-> 129 resampled sample points)
+N_STEPS = 80   # spatial deltas per gesture; matches the native ~119 Hz capture
+               # rate (8.4ms median interval) with 6.93ms/step at median 665ms
+               # duration — 1.21× oversampling, minimal interpolation artifact.
+               # N_STEPS=128 was 1.62× oversample and manufactured artificial
+               # velocity spikes that corrupted every downstream measurement.
 N_FREE = N_STEPS - 1  # free deltas per axis after dropping the constrained tail
-MODEL_DIM = 2 * N_FREE + 1  # 127 du + 127 dv + 1 log-duration = 255
+MODEL_DIM = 2 * N_FREE + 1  # 95 du + 95 dv + 1 log-duration = 191
 MIN_DIST_PX = 20.0  # reject sub-threshold gestures (hover jitter, not aimed movement)
 MAX_DURATION_MS = 5000.0  # reject parked-pointer gestures (median 11 px/s past 10s)
+# Reject compound gestures: path length more than 1.5x the straight-line
+# distance means the pointer wandered or the segmenter merged several reaches
+# into one record. 10% of the corpus exceeds curvature 1.0 (path >2x direct),
+# which is not an aimed reach. Training on the mixture teaches the flow a
+# bimodal lateral distribution it then samples from incoherently.
+MAX_CURVATURE = 0.5
 MIN_POINTS = 4  # reject trajectories too short to interpolate meaningfully
 DEFAULT_TARGET_SIZE_PX = 24.0  # fallback when the capture bounding box is zeroed
 STD_FLOOR = 1e-6  # guard against divide-by-zero on near-constant dimensions
@@ -121,6 +131,11 @@ def process_movement(mov: dict) -> tuple[np.ndarray, np.ndarray, np.ndarray] | N
     dy = raw_y[-1] - raw_y[0]
     dist = math.hypot(dx, dy)
     if dist < MIN_DIST_PX:
+        return None
+
+    # Compound-gesture rejection (see MAX_CURVATURE).
+    path_len = float(np.hypot(np.diff(raw_x), np.diff(raw_y)).sum())
+    if path_len / dist - 1.0 > MAX_CURVATURE:
         return None
 
     # Target size: min(width, height) is the Fitts-relevant extent along the
@@ -179,7 +194,7 @@ def main() -> None:
     xs: list[np.ndarray] = []
     cs: list[np.ndarray] = []
     metas: list[np.ndarray] = []
-    n_short_traj = n_short_dist = n_bad_time = n_long_dur = 0
+    n_short_traj = n_short_dist = n_bad_time = n_long_dur = n_compound = 0
 
     for mov in movements:
         result = process_movement(mov)
@@ -201,7 +216,14 @@ def main() -> None:
         elif traj[-1]["tMs"] - traj[0]["tMs"] > MAX_DURATION_MS:
             n_long_dur += 1
         else:
-            n_bad_time += 1
+            px = np.array([p["x"] for p in traj], float)
+            py = np.array([p["y"] for p in traj], float)
+            straight = math.hypot(px[-1] - px[0], py[-1] - py[0])
+            path = float(np.hypot(np.diff(px), np.diff(py)).sum())
+            if straight > 0 and path / straight - 1.0 > MAX_CURVATURE:
+                n_compound += 1
+            else:
+                n_bad_time += 1
 
     if not xs:
         sys.exit("No usable gestures after filtering -- check the capture format.")
@@ -214,6 +236,7 @@ def main() -> None:
     print(f"  trajectory < {MIN_POINTS} points : {n_short_traj}")
     print(f"  distance < {MIN_DIST_PX:g}px        : {n_short_dist}")
     print(f"  duration > {MAX_DURATION_MS:g}ms       : {n_long_dur}")
+    print(f"  curvature > {MAX_CURVATURE:g}         : {n_compound}")
     print(f"  non-positive duration / nan  : {n_bad_time}")
     print(f"  kept                         : {len(xs)}")
 

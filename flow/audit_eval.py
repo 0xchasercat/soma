@@ -30,6 +30,47 @@ from train_flow import DATA_DIM, LOGDUR_IDX, N_FREE, build_flow
 # ── Reconstruction ────────────────────────────────────────────────────────────
 
 
+# Must stay identical to the constants in src/pointer/flow-synthesis.ts.
+DECEL_WINDOW = 0.125
+TERMINAL_SPEED_RATIO = 0.004
+LATERAL_SMOOTH_PASSES = 2
+
+
+def smooth_lateral(v: np.ndarray, passes: int = LATERAL_SMOOTH_PASSES) -> np.ndarray:
+    """N-pass 3-tap binomial smoothing with pinned endpoints (smoothLateral in TS)."""
+    if len(v) < 3 or passes < 1:
+        return v
+    cur = v
+    for _ in range(passes):
+        out = cur.copy()
+        out[1:-1] = 0.25 * cur[:-2] + 0.5 * cur[1:-1] + 0.25 * cur[2:]
+        cur = out
+    return cur
+
+
+def apply_decel_taper(t: np.ndarray) -> np.ndarray:
+    """
+    Stretch the final intervals in time so speed decays to TERMINAL_SPEED_RATIO
+    of peak at touchdown, preserving total duration (applyDecelerationTaper).
+    """
+    n = len(t)
+    total = float(t[-1])
+    if n < 4 or total <= 0:
+        return t
+    start = 1.0 - DECEL_WINDOW
+    phase = t[:-1] / total
+    w = np.clip((phase - start) / DECEL_WINDOW, 0.0, 1.0)
+    eased = w * w * (3 - 2 * w)  # smoothstep: continuous derivative at the edge
+    stretch = 1.0 + eased * (1.0 / TERMINAL_SPEED_RATIO - 1.0)
+    intervals = np.diff(t) * stretch
+    s = intervals.sum()
+    if s <= 0:
+        return t
+    out = np.concatenate([[0.0], np.cumsum(intervals * (total / s))])
+    out[-1] = total
+    return out
+
+
 def reconstruct(
     x_std_vec: np.ndarray,
     dist_px: float,
@@ -37,9 +78,10 @@ def reconstruct(
     x_std: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    Standardized 255-d model vector -> (u_px, v_px, t_ms) with 129 points.
+    Standardized N-dim model vector -> (u_px, v_px, t_ms).
 
-    Mirrors reconstructGesture() in src/pointer/flow-synthesis.ts.
+    Mirrors reconstructGesture() in src/pointer/flow-synthesis.ts exactly:
+    no taper, no smoothing -- the flow output is used as-is.
     """
     raw = x_std_vec * x_std + x_mean
 
@@ -47,8 +89,6 @@ def reconstruct(
     dv = raw[N_FREE : 2 * N_FREE]
     duration_ms = float(math.exp(raw[LOGDUR_IDX]))
 
-    # Restore the deltas dropped by dataset_prep: the canonical frame pins the
-    # endpoint at (1, 0) in distance-normalized units.
     du = np.concatenate([du, [1.0 - du.sum()]])
     dv = np.concatenate([dv, [0.0 - dv.sum()]])
 

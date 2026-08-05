@@ -16,6 +16,8 @@
     "build:ext": "bun build ext/src/capture.ts --outfile ext/dist/capture.js --target browser --minify && bun build ext/src/background.ts --outfile ext/dist/background.js --target browser --minify && bun build ext/src/popup/popup.ts --outfile ext/dist/popup.js --target browser --minify",
     "train:model": "bun run model/src/train.ts",
     "export:model": "bun run model/src/export_onnx.ts",
+    "prep:flow": "python3 flow/dataset_prep.py \"$CAPTURE\" --out flow/flow_dataset.pt",
+    "train:flow": "python3 flow/train_flow.py --epochs 50 --lr 1e-3 --batch 1024 --seed 42 --out flow/flow.pt --onnx-out model/flow.onnx && python3 flow/export_stats.py --flow flow/flow.pt --out model/flow.stats.json && bun run build",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
@@ -25,6 +27,8 @@
     "model/model.json",
     "model/model.onnx",
     "model/model.metrics.json",
+    "model/flow.onnx",
+    "model/flow.stats.json",
     "model/README.md",
     "model/src",
     "ext"
@@ -40,6 +44,7 @@
   "devDependencies": {
     "@types/chrome": "^0.1.32",
     "@types/node": "^20.14.10",
+    "onnxruntime-node": "^1.19.0",
     "typescript": "^5.5.4"
   },
   "dependencies": {
@@ -52,5 +57,8 @@
     "onnxruntime-node": {
       "optional": true
     }
-  }
+  },
+  "trustedDependencies": [
+    "onnxruntime-node"
+  ]
 }

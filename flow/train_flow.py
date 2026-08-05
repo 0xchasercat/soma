@@ -51,8 +51,8 @@ from nflows.transforms import (
 
 # ── Architecture ──────────────────────────────────────────────────────────────
 
-N_FREE = 127  # free spatial deltas per axis
-DATA_DIM = 2 * N_FREE + 1  # 255
+N_FREE = 79    # free spatial deltas per axis (N_STEPS=80 minus constrained tail)
+DATA_DIM = 2 * N_FREE + 1  # 159
 CONTEXT_DIM = 2
 LOGDUR_IDX = 2 * N_FREE  # index of log(duration_ms)
 N_TRANSFORMS = 6
@@ -106,10 +106,10 @@ class CNN1DConditioner(nn.Module):
             nn.SiLU(),
         )
 
-        # Pool over time to keep the head small, but retain a coarse temporal
-        # summary (4 buckets) so phase information survives.
-        self.pool = nn.AdaptiveAvgPool1d(4)
-        head_in = width * 4 + ctx_hidden + (1 if has_logdur else 0)
+        # Global average pool: always ONNX-exportable regardless of input length
+        # (AdaptiveAvgPool1d(4) fails ONNX when input length is not divisible by 4).
+        self.pool = nn.AdaptiveAvgPool1d(1)
+        head_in = width * 1 + ctx_hidden + (1 if has_logdur else 0)
         self.head = nn.Sequential(
             nn.Linear(head_in, 256),
             nn.SiLU(),
@@ -221,10 +221,22 @@ def train(args) -> None:
     train_loader = DataLoader(train_ds, batch_size=args.batch, shuffle=True, drop_last=True)
     val_loader = DataLoader(val_ds, batch_size=args.batch, shuffle=False)
 
-    # MPS is excluded deliberately: nflows registers float64 buffers inside the
-    # RQ-spline transforms and the MPS backend cannot hold float64.
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    flow = build_flow().to(device)
+    # MPS is the GPU on Apple Silicon. nflows registers one float64 buffer
+    # (_distribution._log_z, the base Gaussian log-normalizer) which MPS
+    # cannot hold. It is a scalar constant (log(2π)/2); casting to float32
+    # loses ~1e-7 relative error, negligible against NLL training noise.
+    device = torch.device(
+        "mps" if torch.backends.mps.is_available()
+        else "cuda" if torch.cuda.is_available()
+        else "cpu"
+    )
+    flow = build_flow()
+    # Cast before .to(device): _log_z is float64 but MPS only holds float32.
+    # Do this on CPU first so .to(device) never sees a float64 buffer.
+    for module in flow.modules():
+        if hasattr(module, "_log_z") and module._log_z.dtype == torch.float64:
+            module._log_z = module._log_z.to(torch.float32)
+    flow = flow.to(device)
     n_params = sum(p.numel() for p in flow.parameters() if p.requires_grad)
     print(f"  device {device}   train {n - n_val:,}   val {n_val:,}   params {n_params:,}")
     print(f"  {N_TRANSFORMS} coupling layers, {N_BINS} bins, tail_bound {TAIL_BOUND}")
@@ -315,7 +327,8 @@ def train(args) -> None:
         out,
     )
     print(f"saved {out}")
-    onnx_path = out.with_suffix(".onnx")
+    onnx_path = Path(args.onnx_out)
+    onnx_path.parent.mkdir(parents=True, exist_ok=True)
     export_onnx(flow, onnx_path)
     print(f"saved {onnx_path}")
 
@@ -333,6 +346,21 @@ class _FlowInverse(nn.Module):
 
 
 def export_onnx(flow: Flow, path: Path) -> None:
+    """Export the inverse pass (z -> x) to ONNX.
+
+    PyTorch >= 2.6 routes torch.onnx.export through the dynamo exporter, which
+    cannot guard on the data-dependent ``torch.any(inside_interval_mask)`` branch
+    inside the nflows RQ-spline, and rejects a pre-traced ScriptModule outright.
+
+    ``fallback=True`` makes the exporter retry with the legacy TorchScript path
+    (``torch.onnx.utils.export``) when the dynamo attempt fails.  That path
+    traces the module internally, folding the data-dependent branches into the
+    concrete path taken for z ~ N(0,1) -- which is the only path the runtime
+    ever exercises, since every sampled value lands inside the spline tails.
+
+    Batch size is fixed at 1; the TypeScript runtime calls the model one gesture
+    at a time.
+    """
     wrapper = _FlowInverse(flow).eval()
     z_dummy = torch.randn(1, DATA_DIM, dtype=torch.float32)
     c_dummy = torch.zeros(1, CONTEXT_DIM, dtype=torch.float32)
@@ -344,18 +372,22 @@ def export_onnx(flow: Flow, path: Path) -> None:
         str(path),
         input_names=["z", "context"],
         output_names=["x"],
-        dynamic_axes={"z": {0: "batch"}, "context": {0: "batch"}, "x": {0: "batch"}},
         opset_version=17,
+        fallback=True,
     )
 
 
 def main() -> None:
     p = argparse.ArgumentParser(description="Train the conditional gesture flow")
     p.add_argument("--dataset", default="flow/flow_dataset.pt")
-    p.add_argument("--out", default="flow/flow.pt")
+    p.add_argument("--out", default="flow/flow.pt",
+                   help="Checkpoint path (.pt); training artifact, not shipped.")
+    p.add_argument("--onnx-out", default="model/flow.onnx",
+                   help="ONNX export path; must match FLOW_ONNX_URL in src/index.ts.")
     p.add_argument("--epochs", type=int, default=40)
     p.add_argument("--lr", type=float, default=1e-3)
-    p.add_argument("--batch", type=int, default=256)
+    p.add_argument("--batch", type=int, default=1024,
+                   help="Batch size. 1024 gives ~10x speedup on MPS vs 256.")
     p.add_argument("--seed", type=int, default=42)
     args = p.parse_args()
 

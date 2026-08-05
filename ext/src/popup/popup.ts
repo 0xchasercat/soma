@@ -7,7 +7,7 @@ export {};
  * messages cannot carry captures larger than 64 MiB.
  */
 
-import { clearAllData, getAllData, getCounts } from '../db.js';
+import { clearAllData, getCounts, streamStore, STORE_NAMES } from '../db.js';
 
 const movementCountEl = document.getElementById('movementCount')!;
 const keystrokeCountEl = document.getElementById('keystrokeCount')!;
@@ -23,27 +23,49 @@ async function refreshStats() {
   scrollCountEl.textContent = counts.scrolls.toString();
 }
 
+/**
+ * Export every capture store as one JSON file.
+ *
+ * The payload is assembled as an ARRAY of Blob parts, never a single string:
+ * `JSON.stringify` on a full multi-10k-gesture capture exceeds V8's maximum
+ * string length and throws `Invalid string length`. Each record is stringified
+ * on its own and the surrounding JSON structure is emitted as literal
+ * fragments, so no individual string is ever larger than one record and the
+ * Blob does the concatenation off-heap.
+ */
 async function exportData() {
   exportBtn.setAttribute('disabled', 'true');
+  const originalLabel = exportBtn.textContent;
   try {
-    const data = await getAllData();
     const exportedAt = new Date().toISOString();
-    const exportPayload = {
+    const parts: BlobPart[] = [];
+    const header = {
       schema: 'soma.capture.v2' as const,
       schemaVersion: 2 as const,
       producer: 'soma-extension/0.2.0',
       exportId: crypto.randomUUID(),
       exportedAt,
       userAgent: navigator.userAgent,
-      movements: data.movements,
-      keystrokes: data.keystrokes,
-      scrolls: data.scrolls,
-      interactions: data.interactions,
     };
 
-    // Compact JSON — pretty-print roughly doubles memory for multi‑10MB captures.
-    const json = JSON.stringify(exportPayload);
-    const blob = new Blob([json], { type: 'application/json' });
+    // Open the object and write the scalar header fields, minus the closing brace.
+    parts.push(JSON.stringify(header).slice(0, -1));
+
+    for (const storeName of STORE_NAMES) {
+      parts.push(`,${JSON.stringify(storeName)}:[`);
+      let written = 0;
+      await streamStore(storeName, 500, (batch) => {
+        for (const record of batch) {
+          parts.push(written === 0 ? JSON.stringify(record) : `,${JSON.stringify(record)}`);
+          written++;
+        }
+        exportBtn.textContent = `Exporting ${storeName} ${written}…`;
+      });
+      parts.push(']');
+    }
+    parts.push('}');
+
+    const blob = new Blob(parts, { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const timestamp = exportedAt.replace(/[:.]/g, '-').slice(0, -5);
     const a = document.createElement('a');
@@ -52,6 +74,7 @@ async function exportData() {
     a.click();
     URL.revokeObjectURL(url);
   } finally {
+    exportBtn.textContent = originalLabel;
     exportBtn.removeAttribute('disabled');
   }
 }

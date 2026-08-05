@@ -345,3 +345,42 @@ describe('extension routing', () => {
     });
   });
 });
+
+describe('flow synthesis', () => {
+  test('reconstructGesture is deterministic and endpoint-exact', async () => {
+    // Test without ONNX — exercises the reconstruction math only.
+    const { reconstructGesture, validateFlowStats } = await import('../src/index.js');
+    const statsRaw = await Bun.file(new URL('../model/flow.stats.json', import.meta.url)).text()
+      .catch(() => null);
+    if (!statsRaw) return; // skip if model not built yet
+
+    const stats = JSON.parse(statsRaw);
+    validateFlowStats(stats);
+
+    const dim = stats.arch.dataDim;
+    // Determinism: same x → same output
+    const x1 = new Float32Array(dim).fill(0);
+    const x2 = new Float32Array(dim).fill(0);
+    const r1 = reconstructGesture(x1, stats);
+    const r2 = reconstructGesture(x2, stats);
+    expect(Array.from(r1.u)).toEqual(Array.from(r2.u));
+    expect(Array.from(r1.v)).toEqual(Array.from(r2.v));
+    expect(Array.from(r1.t)).toEqual(Array.from(r2.t));
+
+    // Endpoint constraint: sum(du) == 1, sum(dv) == 0 in the canonical frame
+    const n = r1.u.length;
+    expect(r1.u[0]).toBe(0);
+    expect(r1.v[0]).toBe(0);
+    expect(Math.abs(r1.u[n - 1]! - 1.0)).toBeLessThan(1e-6);
+    expect(Math.abs(r1.v[n - 1]!)).toBeLessThan(1e-6);
+
+    // Time is monotonically non-decreasing
+    for (let i = 1; i < r1.t.length; i++) {
+      expect(r1.t[i]!).toBeGreaterThanOrEqual(r1.t[i - 1]!);
+    }
+
+    // durationMs is positive and finite
+    expect(r1.durationMs).toBeGreaterThan(0);
+    expect(Number.isFinite(r1.durationMs)).toBe(true);
+  });
+});

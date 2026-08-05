@@ -8,6 +8,7 @@ import type {
   TrajectoryPlan,
 } from './types.js';
 import { synthesizeClick, synthesizeMovement } from './pointer/trajectory.js';
+import { type FlowModel, synthesizeClickFlow, synthesizeMovementFlow } from './pointer/flow-synthesis.js';
 
 export type Delay = (milliseconds: number) => Promise<void>;
 
@@ -96,6 +97,10 @@ export async function dispatchScrollPlan(
 /**
  * Stateful pointer convenience wrapper. `click()` refuses to dispatch a click
  * when the live endpoint no longer resolves to an interactive element.
+ *
+ * Pass `flowModel` to use the trained normalizing-flow synthesizer for all
+ * pointer movements. When omitted the parametric Bezier path is used, which
+ * is the safe default for environments that have not loaded the flow ONNX.
  */
 export class HumanPointer {
   private position: Point2D;
@@ -105,6 +110,7 @@ export class HumanPointer {
     initialPosition: Point2D,
     private readonly profile?: Partial<BehaviorProfile>,
     private readonly delay: Delay = systemDelay,
+    private readonly flowModel?: FlowModel,
   ) {
     this.position = { ...initialPosition };
   }
@@ -114,17 +120,32 @@ export class HumanPointer {
   }
 
   async moveTo(target: TargetBox, seed?: number): Promise<TrajectoryPlan> {
-    const plan = synthesizeMovement(this.position, target, this.profile, seed);
+    const plan = this.flowModel
+      ? await synthesizeMovementFlow(this.flowModel, this.position, target, this.profile, seed)
+      : synthesizeMovement(this.position, target, this.profile, seed);
     await dispatchTrajectory(plan, this.driver, this.delay);
     this.position = { ...plan.endpoint };
     return plan;
   }
 
   async click(target: TargetBox, seed?: number): Promise<DispatchedClick> {
-    const click = synthesizeClick(this.position, target, this.profile, seed);
-    await dispatchTrajectory(click.trajectory, this.driver, this.delay);
-    this.position = { ...click.trajectory.endpoint };
-    await this.delay(click.postArrivalSettleMs);
+    let trajectory: TrajectoryPlan;
+    let settleMs: number;
+    let holdMs: number;
+    if (this.flowModel) {
+      const click = await synthesizeClickFlow(this.flowModel, this.position, target, this.profile, seed);
+      trajectory = click.trajectory;
+      settleMs = click.settleMs;
+      holdMs = click.holdMs;
+    } else {
+      const click = synthesizeClick(this.position, target, this.profile, seed);
+      trajectory = click.trajectory;
+      settleMs = click.postArrivalSettleMs;
+      holdMs = click.clickHoldMs;
+    }
+    await dispatchTrajectory(trajectory, this.driver, this.delay);
+    this.position = { ...trajectory.endpoint };
+    await this.delay(settleMs);
 
     const interactive = await this.driver.isInteractiveAt(this.position.x, this.position.y);
     if (!interactive) {
@@ -132,8 +153,13 @@ export class HumanPointer {
     }
 
     await this.driver.down();
-    await this.delay(click.clickHoldMs);
+    await this.delay(holdMs);
     await this.driver.up();
-    return { ...click, clickTargetIsInteractive: true };
+    return {
+      trajectory,
+      postArrivalSettleMs: settleMs,
+      clickHoldMs: holdMs,
+      clickTargetIsInteractive: true,
+    };
   }
 }

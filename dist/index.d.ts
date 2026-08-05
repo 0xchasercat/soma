@@ -11,6 +11,8 @@ export { DEFAULT_PROFILE, PROFILES, mergeProfile, clampProfile } from './profile
 export { synthesizeMovement, synthesizeClick } from './pointer/trajectory.js';
 export { synthesizeKeystrokes } from './keystroke/plan.js';
 export { synthesizeScroll } from './scroll/plan.js';
+export { synthesizeMovementFlow, synthesizeClickFlow, loadFlowModel, validateFlowStats, reconstructGesture, } from './pointer/flow-synthesis.js';
+export type { FlowModel, FlowStats, FlowSession, FlowTensor, FlowTensorFactory, } from './pointer/flow-synthesis.js';
 export { generateDwell, generatePostActionSettle, generateInterActionInterval, generatePageReadDwell } from './cadence/timing.js';
 export { measureTrajectory, resample60Hz, computeCurvature, countSubmovements, extractSpeeds, classifyVelocityProfile, fitSigmaLognormal, measureTremor, extractKeystrokeFeatures, extractCapturedKeystrokeFeatures, extractCadenceFeatures, extractCapturedInteractionFeatures, } from './measure/index.js';
 export { scoreTrajectory, measureAndScore, loadJSONModel, loadJSONModelText, validateModelWeights, validateModelArtifact, MODEL_ARTIFACT_SCHEMA, MODEL_FEATURE_SCHEMA, isJSONModelAvailable, runJSONInference, extractFeatureVector, heuristicScore, } from './score/index.js';
@@ -24,4 +26,8 @@ export { classifyDigraph, FLIGHT_TIME_PARAMS, HOLD_TIME_MEAN_MS, HOLD_TIME_STD_M
 export declare const MODEL_JSON_URL: URL;
 /** File URL for the bundled ONNX artifact. */
 export declare const MODEL_ONNX_URL: URL;
+/** File URL for the bundled conditional-flow generator (pointer synthesis). */
+export declare const FLOW_ONNX_URL: URL;
+/** File URL for the flow's normalization stats. Required alongside FLOW_ONNX_URL. */
+export declare const FLOW_STATS_URL: URL;
 //# sourceMappingURL=index.d.ts.map
