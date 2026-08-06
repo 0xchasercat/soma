@@ -267,8 +267,8 @@ export function reconstructGesture(
  * @param model   Loaded flow model.
  * @param start   Starting cursor position (viewport coordinates).
  * @param target  Target bounding box.
- * @param profile Behavior profile; only `precision` and `tremor` apply here —
- *                `speed` is ignored because duration is sampled from the model.
+ * @param profile Behavior profile. Flow samples the human duration distribution,
+ *                then applies the persisted persona's bounded speed multiplier.
  * @param seed    RNG seed. Omit for a random gesture, pass for reproducibility.
  */
 export async function synthesizeMovementFlow(
@@ -321,6 +321,7 @@ export async function synthesizeMovementFlow(
   const sin = Math.sin(theta);
   const frameMs = 1000 / FRAME_HZ;
   const tremorAmplitude = Number.isFinite(p.tremor) ? Math.max(0, p.tremor) : 0;
+  const durationScale = 1 / Math.max(0.2, Math.min(3, p.speed));
 
   /** One draw from the flow, mapped into the viewport with tremor applied. */
   const attempt = async (): Promise<{ points: TrajectoryPoint[]; durationMs: number }> => {
@@ -344,7 +345,8 @@ export async function synthesizeMovementFlow(
     }
 
     const canonical = reconstructGesture(xOut, model.stats);
-    const resampled = resampleToFrameRate(canonical.u, canonical.v, canonical.t, frameMs);
+    const personaTime = Float64Array.from(canonical.t, (value) => value * durationScale);
+    const resampled = resampleToFrameRate(canonical.u, canonical.v, personaTime, frameMs);
 
     // Canonical frame -> viewport: scale by distance, rotate onto the start->end
     // direction, translate to the start point.

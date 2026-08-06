@@ -1,5 +1,11 @@
 # Soma Flow Model — Training Results & Deliverables
 
+> Historical Phase 3 results (superseded for runtime status). ONNX export and
+> TypeScript integration are now complete. The current 159-dimensional artifact
+> is `model/flow.onnx`, with architecture metadata in `model/flow.stats.json`.
+> Microstructure figures below describe the earlier 255-dimensional experiment
+> and must not be presented as measurements of the current production artifact.
+
 **Objective:** Replace Soma's hand-calibrated physics (Bezier + AR(2) tremor) with an ML-driven conditional normalizing flow trained on 26,934 real captured gestures.
 
 **Status:** Training and validation **complete**. ONNX export blocked on PyTorch/nflows compatibility (5-line patch required). TypeScript integration architecture documented.

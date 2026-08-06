@@ -11,6 +11,7 @@ import { synthesizeClick, synthesizeMovement } from './pointer/trajectory.js';
 import { type FlowModel, synthesizeClickFlow, synthesizeMovementFlow } from './pointer/flow-synthesis.js';
 
 export type Delay = (milliseconds: number) => Promise<void>;
+export type Clock = () => number;
 
 export interface PointerMoveDriver {
   move(x: number, y: number): Promise<void>;
@@ -49,13 +50,13 @@ export async function dispatchTrajectory(
   plan: TrajectoryPlan,
   driver: PointerMoveDriver,
   delay: Delay = systemDelay,
+  clock: Clock = () => performance.now(),
 ): Promise<void> {
-  await delay(plan.preMoveDelayMs);
-  let elapsed = 0;
+  const startedAt = clock();
   for (const point of plan.points) {
-    await delay(Math.max(0, point.tMs - elapsed));
+    const dueAt = plan.preMoveDelayMs + point.tMs;
+    await delay(Math.max(0, dueAt - (clock() - startedAt)));
     await driver.move(point.x, point.y);
-    elapsed = point.tMs;
   }
 }
 
@@ -64,6 +65,7 @@ export async function dispatchKeystrokePlan(
   plan: KeystrokePlan,
   driver: KeyboardDriver,
   delay: Delay = systemDelay,
+  clock: Clock = () => performance.now(),
 ): Promise<void> {
   const timeline = plan.events.flatMap((event, index) => [
     { atMs: event.downMs, kind: 'down' as const, event, index },
@@ -71,12 +73,11 @@ export async function dispatchKeystrokePlan(
   ]);
   timeline.sort((a, b) => a.atMs - b.atMs || (a.kind === b.kind ? a.index - b.index : a.kind === 'up' ? -1 : 1));
 
-  let elapsed = 0;
+  const startedAt = clock();
   for (const item of timeline) {
-    await delay(Math.max(0, item.atMs - elapsed));
+    await delay(Math.max(0, item.atMs - (clock() - startedAt)));
     if (item.kind === 'down') await driver.down(item.event);
     else await driver.up(item.event);
-    elapsed = item.atMs;
   }
 }
 
@@ -85,12 +86,12 @@ export async function dispatchScrollPlan(
   plan: ScrollPlan,
   driver: ScrollDriver,
   delay: Delay = systemDelay,
+  clock: Clock = () => performance.now(),
 ): Promise<void> {
-  let elapsed = 0;
+  const startedAt = clock();
   for (const frame of plan.frames) {
-    await delay(Math.max(0, frame.tMs - elapsed));
+    await delay(Math.max(0, frame.tMs - (clock() - startedAt)));
     await driver.wheel(frame.deltaY);
-    elapsed = frame.tMs;
   }
 }
 

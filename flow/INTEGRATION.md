@@ -1,5 +1,11 @@
 # Phase 4 — Flow Integration Status
 
+> Historical design record (superseded). Runtime integration is complete in
+> `src/pointer/flow-synthesis.ts`; the bundled `model/flow.onnx` and
+> `model/flow.stats.json` use a 159-dimensional interface. Production callers
+> now require successful ONNX initialization and persist artifact hashes. The
+> blocked-export discussion below documents the earlier 255-dimensional model.
+
 ## Delivered (Phases 1–3)
 
 ✅ **Dataset preparation** — `flow_dataset.pt` with 19,755 gestures (255-dim, non-degenerate)  

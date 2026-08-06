@@ -238,6 +238,7 @@ describe('dispatch', () => {
       trajectory,
       { move: async (x, y) => { pointerEvents.push({ at: elapsed, x, y }); } },
       async (milliseconds) => { elapsed += milliseconds; },
+      () => elapsed,
     );
     expect(pointerEvents[0]!.at).toBe(trajectory.preMoveDelayMs);
     expect(pointerEvents.at(-1)!.at).toBeCloseTo(trajectory.preMoveDelayMs + trajectory.durationMs, 8);
@@ -252,6 +253,7 @@ describe('dispatch', () => {
         up: async (event) => { keyEvents.push({ at: elapsed, kind: 'up', key: event.key }); },
       },
       async (milliseconds) => { elapsed += milliseconds; },
+      () => elapsed,
     );
     expect(keyEvents.find((event) => event.kind === 'down' && event.key === 'b')!.at).toBeCloseTo(keys.events[1]!.downMs, 8);
     expect(keyEvents.at(-1)!.at).toBeCloseTo(keys.totalDurationMs, 8);
@@ -263,6 +265,7 @@ describe('dispatch', () => {
       scroll,
       { wheel: async (deltaY) => { wheelEvents.push({ at: elapsed, deltaY }); } },
       async (milliseconds) => { elapsed += milliseconds; },
+      () => elapsed,
     );
     expect(wheelEvents.at(-1)!.at).toBeCloseTo(scroll.durationMs, 8);
   });
