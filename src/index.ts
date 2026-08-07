@@ -113,7 +113,13 @@ export type {
 } from './dispatch.js';
 export { loadONNXModel, isONNXAvailable } from './score/onnx.js';
 export { handFor, handTransition } from './keystroke/hand.js';
-export { classifyDigraph, FLIGHT_TIME_PARAMS, HOLD_TIME_MEAN_MS, HOLD_TIME_STD_MS } from './keystroke/digraph.js';
+export {
+  classifyDigraph,
+  FLIGHT_TIME_PARAMS,
+  HOLD_TIME_MEAN_MS,
+  HOLD_TIME_STD_MS,
+  RELEASE_PRESS_PARAMS,
+} from './keystroke/digraph.js';
 
 // ─── Model path ──────────────────────────────────────────────────────────────
 

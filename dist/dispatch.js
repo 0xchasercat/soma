@@ -6,39 +6,36 @@ export const systemDelay = async (milliseconds) => {
     await new Promise((resolve) => setTimeout(resolve, milliseconds));
 };
 /** Dispatch a trajectory at its absolute timestamps, including pre-move dwell. */
-export async function dispatchTrajectory(plan, driver, delay = systemDelay) {
-    await delay(plan.preMoveDelayMs);
-    let elapsed = 0;
+export async function dispatchTrajectory(plan, driver, delay = systemDelay, clock = () => performance.now()) {
+    const startedAt = clock();
     for (const point of plan.points) {
-        await delay(Math.max(0, point.tMs - elapsed));
+        const dueAt = plan.preMoveDelayMs + point.tMs;
+        await delay(Math.max(0, dueAt - (clock() - startedAt)));
         await driver.move(point.x, point.y);
-        elapsed = point.tMs;
     }
 }
 /** Dispatch keydown/keyup events on one absolute timeline, including overlap. */
-export async function dispatchKeystrokePlan(plan, driver, delay = systemDelay) {
+export async function dispatchKeystrokePlan(plan, driver, delay = systemDelay, clock = () => performance.now()) {
     const timeline = plan.events.flatMap((event, index) => [
         { atMs: event.downMs, kind: 'down', event, index },
         { atMs: event.downMs + event.holdMs, kind: 'up', event, index },
     ]);
     timeline.sort((a, b) => a.atMs - b.atMs || (a.kind === b.kind ? a.index - b.index : a.kind === 'up' ? -1 : 1));
-    let elapsed = 0;
+    const startedAt = clock();
     for (const item of timeline) {
-        await delay(Math.max(0, item.atMs - elapsed));
+        await delay(Math.max(0, item.atMs - (clock() - startedAt)));
         if (item.kind === 'down')
             await driver.down(item.event);
         else
             await driver.up(item.event);
-        elapsed = item.atMs;
     }
 }
 /** Dispatch wheel frames at their absolute timestamps. */
-export async function dispatchScrollPlan(plan, driver, delay = systemDelay) {
-    let elapsed = 0;
+export async function dispatchScrollPlan(plan, driver, delay = systemDelay, clock = () => performance.now()) {
+    const startedAt = clock();
     for (const frame of plan.frames) {
-        await delay(Math.max(0, frame.tMs - elapsed));
+        await delay(Math.max(0, frame.tMs - (clock() - startedAt)));
         await driver.wheel(frame.deltaY);
-        elapsed = frame.tMs;
     }
 }
 /**

@@ -38,8 +38,8 @@ export interface BehaviorProfile {
      */
     mistakeRate: number;
     /**
-     * Movement speed multiplier applied to Fitts MT (default: 1.0).
-     * < 1 = faster; > 1 = slower/more deliberate.
+     * Movement speed multiplier (default: 1.0).
+     * > 1 = faster; < 1 = slower/more deliberate.
      */
     speed: number;
     /** Optional cadence multiplier for inter-action timing (default: 1). */
@@ -159,6 +159,8 @@ export interface KeystrokeFeatures {
     hold_times: number[];
     /** Inter-key FT array (tDown[i+1] − tDown[i] in ms). */
     flight_times: number[];
+    /** Release-to-next-press intervals; negative values are overlapping keypresses. */
+    release_press_times: number[];
     /** Coefficient of variation (σ/μ) of hold times. */
     hold_time_cv: number;
     /** Coefficient of variation (σ/μ) of flight times. */
@@ -178,6 +180,8 @@ export interface KeystrokeFeatures {
     correction_count: number;
     /** Minimum flight time in ms (paste/HID-injection yields near-zero). */
     min_flight_time: number;
+    /** Fraction of release-to-press intervals below zero. */
+    overlap_ratio: number;
 }
 /** Interaction cadence features for a session. */
 export interface CadenceFeatures {

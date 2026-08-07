@@ -22,7 +22,7 @@ export { fittsMovementTime, dist2D, sampleEndpoint, preMoveSettle, clickHoldTime
 export { HumanPointer, dispatchTrajectory, dispatchKeystrokePlan, dispatchScrollPlan, systemDelay, } from './dispatch.js';
 export { loadONNXModel, isONNXAvailable } from './score/onnx.js';
 export { handFor, handTransition } from './keystroke/hand.js';
-export { classifyDigraph, FLIGHT_TIME_PARAMS, HOLD_TIME_MEAN_MS, HOLD_TIME_STD_MS } from './keystroke/digraph.js';
+export { classifyDigraph, FLIGHT_TIME_PARAMS, HOLD_TIME_MEAN_MS, HOLD_TIME_STD_MS, RELEASE_PRESS_PARAMS, } from './keystroke/digraph.js';
 // ─── Model path ──────────────────────────────────────────────────────────────
 /** File URL for the bundled canonical JSON weight artifact. */
 export const MODEL_JSON_URL = new URL('../model/model.json', import.meta.url);

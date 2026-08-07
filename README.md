@@ -71,7 +71,7 @@ await dispatchKeystrokePlan(plan, {
 });
 ```
 
-`KeyEvent.downMs` is an absolute offset. The dispatcher schedules keydown and keyup on one timeline, so overlapping holds are not accidentally serialized. Uppercase and shifted punctuation expose `shiftKey` and `modifiers` metadata; the consumer is responsible for sending the corresponding modifier through its trusted input channel.
+`KeyEvent.downMs` is an absolute offset. The timing model samples release-to-next-press latency by privacy-safe digraph class, including negative intervals for key rollover, and derives keydown-to-keydown timing from it. The dispatcher schedules keydown and keyup on one timeline, so overlapping holds are not serialized. Measurement exposes both timing families through `flight_times`, `release_press_times`, and `overlap_ratio`. Uppercase and shifted punctuation expose `shiftKey` and `modifiers` metadata; the consumer is responsible for sending the corresponding modifier through its trusted input channel.
 
 ## Scroll
 
@@ -123,7 +123,23 @@ bun run train:model -- \
   --metrics model/model.metrics.json
 ```
 
-The command uses full-duration deterministic negatives, session/group-disjoint train/validation/test cohorts, a training-only set of Soma compatibility paths, strict class checks, a Soma self-consistency gate, and a long-straight-negative gate. The metrics file records both promotion gates, the model hash, feature schema, cohort sizes, confusion counts, and limitations. It does not establish population-level authenticity or third-party detector performance.
+The command retains every trusted, structurally measurable human trajectory, including short, long, straight, highly curved, hesitant, and corrective paths. It uses full-duration deterministic negatives, WindMouse-style force/quantization negatives, the nine BeCAPTCHA function/velocity families, session/group-disjoint train/validation/test cohorts, strict class checks, a held-out Soma self-consistency probe, and a long-straight-negative gate. Soma output is never inserted into training labels. The metrics file records both promotion gates, the model hash, feature schema, cohort sizes, confusion counts, per-source test results, and limitations. It does not establish population-level authenticity or third-party detector performance.
+
+The conditional synthesis flow is prepared separately:
+
+```bash
+CAPTURE=/path/to/soma-capture.json bun run prep:flow
+bun run train:flow
+bun run test:flow
+```
+
+Flow preparation applies no distance, duration, or curvature quality filters. It repairs finite timestamp-delivery artifacts and retains session identifiers for group-disjoint validation. A record with no measurable time span or exactly zero start-to-end displacement cannot be represented by the flow's target-directed canonical frame, but it remains valid human input for discriminator training. Runtime flow samples are never redrawn according to the discriminator score.
+
+Session-level aggregate tables are not flow-training data. In particular,
+`featurized_mouse_data.csv` labels normal versus anomalous/unauthorized sessions,
+not human versus automated trajectories, and contains no point sequence from which
+the conditional reach model can learn. Use such data only as a separately declared
+aggregate anomaly benchmark after duplicate-group and label-conflict auditing.
 
 ## Capture privacy and coverage
 

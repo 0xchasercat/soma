@@ -129,6 +129,23 @@ describe('keystrokes and scrolls', () => {
     expect(event.pauseAfterMs).toBeLessThanOrEqual(300);
   });
 
+  test('produces human-rate key rollover instead of serializing most key holds', () => {
+    let pairs = 0;
+    let overlaps = 0;
+    for (let seed = 0; seed < 200; seed++) {
+      const plan = synthesizeKeystrokes('the quick brown fox jumps over the lazy dog', { mistakeRate: 0 }, seed);
+      for (let index = 1; index < plan.events.length; index++) {
+        const previous = plan.events[index - 1]!;
+        const current = plan.events[index]!;
+        pairs++;
+        if (current.downMs < previous.downMs + previous.holdMs) overlaps++;
+      }
+    }
+    const ratio = overlaps / pairs;
+    expect(ratio).toBeGreaterThan(0.35);
+    expect(ratio).toBeLessThan(0.5);
+  });
+
   test('preserves requested scroll distance and bounds short peaks', () => {
     for (const target of [-2000, -500, -179, -100, -25, -1, 0, 1, 25, 100, 179, 500, 2000]) {
       const plan = synthesizeScroll(target, undefined, 12);
@@ -175,6 +192,8 @@ describe('capture evidence extraction', () => {
     const features = extractCapturedKeystrokeFeatures(capture);
     expect(features.hold_times).toEqual([100, 70, 60, 100]);
     expect(features.flight_times).toEqual([120, 100, 180]);
+    expect(features.release_press_times).toEqual([20, 30, 120]);
+    expect(features.overlap_ratio).toBe(0);
     expect(features.digraph_class_variance).toBeGreaterThan(0);
     expect(features.correction_count).toBe(1);
     expect(JSON.stringify(capture)).not.toContain('"key"');
@@ -201,7 +220,29 @@ describe('capture evidence extraction', () => {
     const features = extractCapturedKeystrokeFeatures(withModifier);
     expect(features.hold_times).toEqual([80, 80]);
     expect(features.flight_times).toEqual([150]);
+    expect(features.release_press_times).toEqual([70]);
     expect(features.min_flight_time).toBe(150);
+  });
+
+  test('measures negative release-to-press latency as rollover', () => {
+    const rollover: RawKeystroke = {
+      sessionId: 'session',
+      capturedAt: 1,
+      sourceSchema: 'soma.capture.v2',
+      trustedEvents: true,
+      events: [
+        { downMs: 0, upMs: 90, trusted: true, keyKind: 'character', digraphClass: 'none' },
+        { downMs: 55, upMs: 130, trusted: true, keyKind: 'character', digraphClass: 'cross-hand' },
+      ],
+      charCount: 2,
+      charsCommitted: 2,
+      fieldType: 'text',
+      correctionCount: 0,
+    };
+    const features = extractCapturedKeystrokeFeatures(rollover);
+    expect(features.flight_times).toEqual([55]);
+    expect(features.release_press_times).toEqual([-35]);
+    expect(features.overlap_ratio).toBe(1);
   });
 
   test('derives provenance, cadence, and true action-ready latency', () => {
@@ -350,6 +391,59 @@ describe('extension routing', () => {
 });
 
 describe('flow synthesis', () => {
+  test('caps dispatch frames without truncating long movement duration', async () => {
+    const { MAX_DISPATCH_FRAMES, resampleToFrameRate } = await import('../src/pointer/flow-synthesis.js');
+    const source = {
+      u: new Float64Array([0, 1]),
+      v: new Float64Array([0, 0]),
+      t: new Float64Array([0, 3_600_000]),
+    };
+    const output = resampleToFrameRate(source.u, source.v, source.t, 1000 / 60);
+    expect(output.t.length).toBe(MAX_DISPATCH_FRAMES);
+    expect(output.t[output.t.length - 1]).toBe(3_600_000);
+    expect(output.u[output.u.length - 1]).toBe(1);
+  });
+
+  test('reports the persona-scaled flow duration', async () => {
+    const { synthesizeMovementFlow } = await import('../src/pointer/flow-synthesis.js');
+    const model = {
+      stats: {
+        schemaVersion: 2 as const,
+        arch: { dataDim: 3, contextDim: 3, nTransforms: 1, nBins: 2, tailBound: 6 },
+        layout: {
+          nSteps: 2,
+          nFree: 1,
+          droppedDeltaIndex: 1,
+          duStart: 0,
+          dvStart: 1,
+          logDurationIndex: 2,
+        },
+        stats: {
+          xMean: [0.5, 0, Math.log(100)],
+          xStd: [1, 1, 1],
+          cMean: [0, 0, 0],
+          cStd: [1, 1, 1],
+        },
+        postprocess: { terminalStopProbability: 1, terminalStopEpsilon: 1e-6 },
+      },
+      session: {
+        run: async () => ({ x: { data: new Float32Array([0, 0, 0]) } }),
+      },
+      tensor: (data: Float32Array) => ({ data }),
+    };
+    const plan = await synthesizeMovementFlow(
+      model,
+      { x: 0, y: 0 },
+      { x: 100, y: 0, width: 20, height: 20 },
+      { speed: 2, tremor: 0, precision: 1 },
+      42,
+    );
+    expect(Math.abs(plan.durationMs - 50)).toBeLessThan(1e-4);
+    expect(plan.points[plan.points.length - 1]!.tMs).toBe(plan.durationMs);
+    expect(plan.points[plan.points.length - 2]!.x).toBe(plan.points[plan.points.length - 1]!.x);
+    expect(plan.points[plan.points.length - 2]!.y).toBe(plan.points[plan.points.length - 1]!.y);
+  });
+
   test('reconstructGesture is deterministic and endpoint-exact', async () => {
     // Test without ONNX — exercises the reconstruction math only.
     const { reconstructGesture, validateFlowStats } = await import('../src/index.js');
@@ -376,6 +470,10 @@ describe('flow synthesis', () => {
     expect(r1.v[0]).toBe(0);
     expect(Math.abs(r1.u[n - 1]! - 1.0)).toBeLessThan(1e-6);
     expect(Math.abs(r1.v[n - 1]!)).toBeLessThan(1e-6);
+
+    const stopped = reconstructGesture(x1, stats, true);
+    expect(stopped.u[stopped.u.length - 1]! - stopped.u[stopped.u.length - 2]!).toBe(0);
+    expect(stopped.v[stopped.v.length - 1]! - stopped.v[stopped.v.length - 2]!).toBe(0);
 
     // Time is monotonically non-decreasing
     for (let i = 1; i < r1.t.length; i++) {

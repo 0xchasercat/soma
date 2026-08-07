@@ -6,7 +6,7 @@
 
 import type { RNG } from '../rng.js';
 import type { BehaviorProfile } from '../types.js';
-import { classifyDigraph, FLIGHT_TIME_PARAMS, HOLD_TIME_MEAN_MS, HOLD_TIME_STD_MS } from './digraph.js';
+import { classifyDigraph, HOLD_TIME_MEAN_MS, HOLD_TIME_STD_MS, RELEASE_PRESS_PARAMS } from './digraph.js';
 
 /** Timing for one keystroke. */
 export interface KeyTiming {
@@ -49,8 +49,18 @@ export function synthesizeTiming(
     if (i > 0) {
       const prevKey = keys[i - 1]!;
       const dgClass = classifyDigraph(prevKey, key);
-      const params = FLIGHT_TIME_PARAMS[dgClass];
-      flightMs = Math.max(32, rng.nextLognormal(params.mu, params.sigma) * speedMult);
+      const params = RELEASE_PRESS_PARAMS[dgClass];
+      const previousHoldMs = timings[i - 1]!.holdMs;
+      // Model key-up -> next-key-down directly. Negative values preserve rollover;
+      // DD (the public flightMs field) is then derived from the previous hold.
+      const speedAdjustedOverlap = Math.min(0.85, Math.max(
+        0.02,
+        params.overlapProbability * Math.sqrt(profile.wpm / baselineWpm),
+      ));
+      const releasePressMs = rng.next() < speedAdjustedOverlap
+        ? -rng.nextLognormal(params.overlapMagnitude.mu, params.overlapMagnitude.sigma)
+        : rng.nextLognormal(params.nonOverlap.mu, params.nonOverlap.sigma) * speedMult;
+      flightMs = Math.max(8, previousHoldMs + releasePressMs);
     }
     if (key === 'Backspace' && i > 0) {
       flightMs = rng.nextRange(200, 500);

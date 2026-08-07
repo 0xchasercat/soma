@@ -20,6 +20,14 @@
  *   - HumanCursor (the Camoufox-class humanizer cside flagged 100% of the time):
  *     piecewise-linear interpolation between a few "human" waypoints with a
  *     sinusoidal ease and per-step random sleep; distortion applied to the midpoint.
+ *   - WindMouse: attraction-to-target plus persistent random force, velocity
+ *     clipping, near-target damping, integer coordinate quantization, and fixed
+ *     dispatch cadence.
+ *   - BeCAPTCHA function family: the benchmark's factorial coverage of linear,
+ *     quadratic, and exponential geometry under constant, accelerating, and
+ *     acceleration/deceleration velocity profiles. The benchmark publishes the
+ *     family rather than generator code, so these are independent implementations
+ *     of those behavioral classes, not copied source.
  */
 
 import type { TrajectoryPoint } from '../../src/types.js';
@@ -154,6 +162,124 @@ export function generateHumanCursor(start: Point, end: Point, rng: RNG): Traject
   return path;
 }
 
+/**
+ * WindMouse-style force simulation.
+ *
+ * Defect vs human: the path is the output of a low-order physical simulation,
+ * coordinates are integer-quantized, and the controller dispatches every point at
+ * one fixed cadence. Those artifacts are useful hard-negative coverage even when
+ * the resulting curve looks convincing in a video.
+ */
+export function generateWindMouse(start: Point, end: Point, rng: RNG): TrajectoryPoint[] {
+  const destination = { x: Math.round(end.x), y: Math.round(end.y) };
+  let x = Math.round(start.x);
+  let y = Math.round(start.y);
+  let velocityX = 0;
+  let velocityY = 0;
+  let windX = 0;
+  let windY = 0;
+  let maxStep = 15;
+  const gravity = 9;
+  const wind = 3;
+  const dampedDistance = 12;
+  const sqrt3 = Math.sqrt(3);
+  const sqrt5 = Math.sqrt(5);
+  const cadenceMs = 10;
+  const path: TrajectoryPoint[] = [{ x, y, tMs: 0 }];
+
+  for (let iteration = 0; iteration < 10_000; iteration++) {
+    const dx = destination.x - x;
+    const dy = destination.y - y;
+    const distance = Math.hypot(dx, dy);
+    if (distance < 1) break;
+
+    const currentWind = Math.min(wind, distance);
+    if (distance >= dampedDistance) {
+      windX = windX / sqrt3 + rng.nextRange(-currentWind, currentWind) / sqrt5;
+      windY = windY / sqrt3 + rng.nextRange(-currentWind, currentWind) / sqrt5;
+    } else {
+      windX /= sqrt3;
+      windY /= sqrt3;
+      maxStep = maxStep < 3 ? rng.nextRange(3, 6) : maxStep / sqrt5;
+    }
+
+    velocityX += windX + gravity * dx / distance;
+    velocityY += windY + gravity * dy / distance;
+    const speed = Math.hypot(velocityX, velocityY);
+    if (speed > maxStep) {
+      const clipped = rng.nextRange(maxStep / 2, maxStep);
+      velocityX = velocityX / speed * clipped;
+      velocityY = velocityY / speed * clipped;
+    }
+
+    x += velocityX;
+    y += velocityY;
+    const rounded = { x: Math.round(x), y: Math.round(y) };
+    const previous = path[path.length - 1]!;
+    if (rounded.x !== previous.x || rounded.y !== previous.y) {
+      path.push({ ...rounded, tMs: path.length * cadenceMs });
+    }
+  }
+
+  const previous = path[path.length - 1]!;
+  if (previous.x !== destination.x || previous.y !== destination.y) {
+    path.push({ ...destination, tMs: path.length * cadenceMs });
+  }
+  return path;
+}
+
+type FunctionShape = 'linear' | 'quadratic' | 'exponential';
+type VelocityProfile = 'constant' | 'accelerating' | 'bell';
+
+/** Independent implementation of the nine function/velocity classes in BeCAPTCHA. */
+export function generateFunctionFamily(
+  start: Point,
+  end: Point,
+  rng: RNG,
+  shape: FunctionShape,
+  velocity: VelocityProfile,
+): TrajectoryPoint[] {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const distance = Math.max(1, Math.hypot(dx, dy));
+  const axisX = dx / distance;
+  const axisY = dy / distance;
+  const normalX = -axisY;
+  const normalY = axisX;
+  const amplitude = rng.nextRange(-0.22, 0.22) * distance;
+  const exponent = rng.nextRange(2, 5);
+  const steps = 48 + rng.nextInt(49);
+  const cadenceMs = rng.nextRange(7, 13);
+
+  return Array.from({ length: steps + 1 }, (_, index) => {
+    const t = index / steps;
+    const progress = velocity === 'constant'
+      ? t
+      : velocity === 'accelerating'
+        ? t * t
+        : t * t * (3 - 2 * t);
+    const curvature = shape === 'linear'
+      ? 0
+      : shape === 'quadratic'
+        ? 4 * progress * (1 - progress)
+        : 3 * ((Math.exp(exponent * progress) - 1) / (Math.exp(exponent) - 1) - progress);
+    return {
+      x: start.x + dx * progress + normalX * amplitude * curvature,
+      y: start.y + dy * progress + normalY * amplitude * curvature,
+      tMs: index * cadenceMs,
+    };
+  });
+}
+
+const functionFamilies = (
+  ['linear', 'quadratic', 'exponential'] as const
+).flatMap((shape) => (
+  ['constant', 'accelerating', 'bell'] as const
+).map((velocity) => ({
+  source: `becaptcha_${shape}_${velocity}`,
+  generate: (start: Point, end: Point, rng: RNG) => generateFunctionFamily(start, end, rng, shape, velocity),
+})));
+
 /** Every hard-negative generator, addressed by a stable source label. */
 export const HARD_NEGATIVE_GENERATORS: ReadonlyArray<{
   source: string;
@@ -162,4 +288,6 @@ export const HARD_NEGATIVE_GENERATORS: ReadonlyArray<{
   { source: 'ghost_cursor', generate: generateGhostCursor },
   { source: 'bezmouse', generate: generateBezmouse },
   { source: 'human_cursor', generate: generateHumanCursor },
+  { source: 'windmouse', generate: generateWindMouse },
+  ...functionFamilies,
 ];

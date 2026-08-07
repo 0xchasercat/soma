@@ -54,6 +54,38 @@ function canonicalModel(logit: number) {
 }
 
 describe('model artifacts and capture cohorts', () => {
+  test('retains measurable human movements across duration and sample-count tails', () => {
+    const varied = capture('soma.capture.v2', true);
+    const template = varied.movements[0]!;
+    varied.movements = [
+      {
+        ...template,
+        sessionId: 'short-fast',
+        trajectory: [{ x: 0, y: 0, tMs: 0 }, { x: 2, y: 1, tMs: 8 }],
+      },
+      {
+        ...template,
+        sessionId: 'long-hesitant',
+        trajectory: [
+          { x: 0, y: 0, tMs: 0 },
+          { x: 10, y: 30, tMs: 12_000 },
+          { x: 4, y: 2, tMs: 25_000 },
+        ],
+      },
+      {
+        ...template,
+        sessionId: 'single-point-unmeasurable',
+        trajectory: [{ x: 0, y: 0, tMs: 0 }],
+      },
+    ];
+
+    const humans = buildDataset(varied)
+      .filter((sample) => sample.label === 0)
+      .map((sample) => sample.groupId)
+      .sort();
+    expect(humans).toEqual(['long-hesitant', 'short-fast']);
+  });
+
   test('gates legacy records and preserves each capture schema', () => {
     const v1 = capture('soma.capture.v1', undefined, 'soma.capture.v1');
     const v2 = capture('soma.capture.v2', true, 'soma.capture.v2');
@@ -82,7 +114,21 @@ describe('model artifacts and capture cohorts', () => {
     const hardSources = [...new Set(forwardDataset
       .filter((sample) => sample.groupId.startsWith('hard-'))
       .map((sample) => sample.source))].sort();
-    expect(hardSources).toEqual(['bezmouse', 'ghost_cursor', 'human_cursor']);
+    expect(hardSources).toEqual([
+      'becaptcha_exponential_accelerating',
+      'becaptcha_exponential_bell',
+      'becaptcha_exponential_constant',
+      'becaptcha_linear_accelerating',
+      'becaptcha_linear_bell',
+      'becaptcha_linear_constant',
+      'becaptcha_quadratic_accelerating',
+      'becaptcha_quadratic_bell',
+      'becaptcha_quadratic_constant',
+      'bezmouse',
+      'ghost_cursor',
+      'human_cursor',
+      'windmouse',
+    ]);
     expect(forwardDataset.filter((sample) => sample.groupId.startsWith('hard-')).every((sample) => sample.label === 1)).toBe(true);
 
     // A v2 export carrying individual v1-era movement records skips them without

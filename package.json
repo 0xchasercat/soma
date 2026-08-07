@@ -18,6 +18,8 @@
     "export:model": "bun run model/src/export_onnx.ts",
     "prep:flow": "python3 flow/dataset_prep.py \"$CAPTURE\" --out flow/flow_dataset.pt",
     "train:flow": "python3 flow/train_flow.py --epochs 50 --lr 1e-3 --batch 1024 --seed 42 --out flow/flow.pt --onnx-out model/flow.onnx && python3 flow/export_stats.py --flow flow/flow.pt --out model/flow.stats.json && bun run build",
+    "test:flow": "PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s flow -p 'test_*.py'",
+    "verify:flow": "python3 flow/verify_onnx.py",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
@@ -27,6 +29,7 @@
     "model/model.json",
     "model/model.onnx",
     "model/model.metrics.json",
+    "model/DATA_AUDIT.md",
     "model/flow.onnx",
     "model/flow.stats.json",
     "model/README.md",

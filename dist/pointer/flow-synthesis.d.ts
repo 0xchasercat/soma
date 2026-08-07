@@ -2,38 +2,23 @@
  * Flow-based pointer synthesis.
  *
  * Replaces the parametric Bezier + Fitts + overshoot pipeline with a sample
- * from a conditional normalizing flow trained on 19,755 real captured gestures
- * (see flow/train_flow.py). The flow models
+ * from a conditional normalizing flow trained on captured human gestures (see
+ * flow/train_flow.py). The flow models
  *
- *     p( du[0..126], dv[0..126], log(duration_ms) | log(distance), log(target_size) )
+ *     p( 79 free du, 79 free dv, log(duration_ms)
+ *        | log(distance), log(target_size), terminal_stop )
  *
  * in a canonical target-relative frame: start at the origin, endpoint on the
- * +X axis at unit distance, 129 points on a uniform time grid.
+ * +X axis at unit distance, 81 points on a uniform time grid.
  *
- * Why this beats the parametric path
- * ----------------------------------
- * Overshoot rate, peak-velocity timing and velocity-profile shape are learned
- * jointly from data instead of being hand-tuned one constant at a time. The
- * Phase 3 audit measured discriminator separability dropping from 91.1% to
- * 31.6% (overshoot), 87.3% to 29.5% (peak timing) and 84.7% to 0.0%
- * (bell profile).
+ * Geometry, velocity, and duration are learned jointly rather than being tuned
+ * one constant at a time. Current claims come only from the session-held-out
+ * audit; historical hard-coded comparisons are not runtime guarantees.
  *
- * Post-processing is NOT cosmetic
- * -------------------------------
- * The same audit found three defects the raw samples do not fix on their own,
- * each of which is independently a detection signal:
- *
- *   1. terminal velocity   — raw samples land at 72% of peak speed; real
- *                            gestures land at 0.4%. A cursor that arrives at
- *                            full speed and stops dead is not physical.
- *   2. submovement count    — raw samples show ~40 speed reversals against a
- *                            real ~13, because per-timestep spline noise reads
- *                            as high-frequency chatter.
- *   3. lateral tremor band  — raw high-frequency lateral energy is ~9x real.
- *
- * `applyDecelerationTaper` and `smoothLateral` below correct 1-3 in the
- * reconstruction, which is the same code path the Phase 3 audit measures, so
- * the numbers reported there describe what actually ships.
+ * Samples are not rejected for resembling a synthetic generator. A genuine
+ * human distribution includes straight, slow, corrective, and otherwise
+ * automation-like tails; scorer-guided redraws would censor those tails and
+ * make the shipped distribution cleaner than the source population.
  *
  * Determinism
  * -----------
@@ -44,7 +29,7 @@
 import type { BehaviorProfile, Point2D, TargetBox, TrajectoryPlan } from '../types.js';
 /** Normalization constants and layout emitted by flow/export_stats.py. */
 export interface FlowStats {
-    schemaVersion: number;
+    schemaVersion: 2;
     arch: {
         dataDim: number;
         contextDim: number;
@@ -55,6 +40,7 @@ export interface FlowStats {
     layout: {
         nSteps: number;
         nFree: number;
+        droppedDeltaIndex: number;
         duStart: number;
         dvStart: number;
         logDurationIndex: number;
@@ -64,6 +50,10 @@ export interface FlowStats {
         xStd: number[];
         cMean: number[];
         cStd: number[];
+    };
+    postprocess: {
+        terminalStopProbability: number;
+        terminalStopEpsilon: number;
     };
     bestValNll: number;
 }
@@ -118,12 +108,29 @@ export declare function loadFlowModel(options: {
     tensor: FlowTensorFactory;
 }): Promise<FlowModel>;
 /**
+ * Prevent retained long-duration human records from allocating an unbounded
+ * output array. The elapsed duration is preserved; only the dispatch sampling
+ * interval becomes adaptive above this limit.
+ */
+export declare const MAX_DISPATCH_FRAMES = 4096;
+/**
+ * Resample a canonical-frame path onto a fixed frame interval.
+ *
+ * The flow emits 81 points on its own uniform grid; dispatch needs samples at
+ * the frame rate the pointer actually reports at.
+ */
+export declare function resampleToFrameRate(u: Float64Array, v: Float64Array, t: Float64Array, frameMs: number): {
+    u: Float64Array;
+    v: Float64Array;
+    t: Float64Array;
+};
+/**
  * Turn one standardized model vector into a canonical-frame gesture.
  *
  * Mirrors `reconstruct()` in flow/audit_eval.py. Exported so the audit and the
  * runtime can be checked against each other.
  */
-export declare function reconstructGesture(xStandardized: Float32Array, stats: FlowStats): {
+export declare function reconstructGesture(xStandardized: Float32Array, stats: FlowStats, forceTerminalStop?: boolean): {
     u: Float64Array;
     v: Float64Array;
     t: Float64Array;
@@ -138,8 +145,8 @@ export declare function reconstructGesture(xStandardized: Float32Array, stats: F
  * @param model   Loaded flow model.
  * @param start   Starting cursor position (viewport coordinates).
  * @param target  Target bounding box.
- * @param profile Behavior profile; only `precision` and `tremor` apply here —
- *                `speed` is ignored because duration is sampled from the model.
+ * @param profile Behavior profile. Flow samples the human duration distribution,
+ *                then applies the persisted persona's bounded speed multiplier.
  * @param seed    RNG seed. Omit for a random gesture, pass for reproducibility.
  */
 export declare function synthesizeMovementFlow(model: FlowModel, start: Point2D, target: TargetBox, profile?: Partial<BehaviorProfile>, seed?: number): Promise<TrajectoryPlan>;

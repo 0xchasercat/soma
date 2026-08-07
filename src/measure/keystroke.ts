@@ -132,6 +132,8 @@ export function extractKeystrokeFeatures(
   flightTimes: number[],
   correctionCount: number,
 ): KeystrokeFeatures {
+  const releasePressTimes = flightTimes.map((flightTime, index) =>
+    flightTime - (holdTimes[index] ?? 0));
   const hold_time_cv = cv(holdTimes);
   const flight_time_cv = cv(flightTimes);
   const digraph_class_variance = computeDigraphVariance(keys, flightTimes);
@@ -141,12 +143,16 @@ export function extractKeystrokeFeatures(
   return {
     hold_times: holdTimes,
     flight_times: flightTimes,
+    release_press_times: releasePressTimes,
     hold_time_cv,
     flight_time_cv,
     digraph_class_variance,
     timing_cdf_distance,
     correction_count: correctionCount,
     min_flight_time,
+    overlap_ratio: releasePressTimes.length === 0
+      ? 0
+      : releasePressTimes.filter((value) => value < 0).length / releasePressTimes.length,
   };
 }
 
@@ -160,21 +166,27 @@ export function extractCapturedKeystrokeFeatures(capture: RawKeystroke): Keystro
     .sort((a, b) => a.downMs - b.downMs);
   const holdTimes = events.map((event) => event.upMs - event.downMs);
   const flightTimes: number[] = [];
+  const releasePressTimes: number[] = [];
   const classes: RawDigraphClass[] = [];
   for (let index = 1; index < events.length; index++) {
     const flightTime = events[index]!.downMs - events[index - 1]!.downMs;
     if (!Number.isFinite(flightTime) || flightTime < 0) continue;
     flightTimes.push(flightTime);
+    releasePressTimes.push(events[index]!.downMs - events[index - 1]!.upMs);
     classes.push(events[index]!.digraphClass ?? 'none');
   }
   return {
     hold_times: holdTimes,
     flight_times: flightTimes,
+    release_press_times: releasePressTimes,
     hold_time_cv: cv(holdTimes),
     flight_time_cv: cv(flightTimes),
     digraph_class_variance: computeCapturedDigraphVariance(classes, flightTimes),
     timing_cdf_distance: computeCDFDistance(flightTimes),
     correction_count: Math.max(0, capture.correctionCount),
     min_flight_time: flightTimes.length > 0 ? Math.min(...flightTimes) : 0,
+    overlap_ratio: releasePressTimes.length === 0
+      ? 0
+      : releasePressTimes.filter((value) => value < 0).length / releasePressTimes.length,
   };
 }

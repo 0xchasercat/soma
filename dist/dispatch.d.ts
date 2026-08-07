@@ -1,6 +1,7 @@
 import type { BehaviorProfile, KeyEvent, KeystrokePlan, Point2D, ScrollPlan, TargetBox, TrajectoryPlan } from './types.js';
 import { type FlowModel } from './pointer/flow-synthesis.js';
 export type Delay = (milliseconds: number) => Promise<void>;
+export type Clock = () => number;
 export interface PointerMoveDriver {
     move(x: number, y: number): Promise<void>;
 }
@@ -25,11 +26,11 @@ export interface DispatchedClick {
 }
 export declare const systemDelay: Delay;
 /** Dispatch a trajectory at its absolute timestamps, including pre-move dwell. */
-export declare function dispatchTrajectory(plan: TrajectoryPlan, driver: PointerMoveDriver, delay?: Delay): Promise<void>;
+export declare function dispatchTrajectory(plan: TrajectoryPlan, driver: PointerMoveDriver, delay?: Delay, clock?: Clock): Promise<void>;
 /** Dispatch keydown/keyup events on one absolute timeline, including overlap. */
-export declare function dispatchKeystrokePlan(plan: KeystrokePlan, driver: KeyboardDriver, delay?: Delay): Promise<void>;
+export declare function dispatchKeystrokePlan(plan: KeystrokePlan, driver: KeyboardDriver, delay?: Delay, clock?: Clock): Promise<void>;
 /** Dispatch wheel frames at their absolute timestamps. */
-export declare function dispatchScrollPlan(plan: ScrollPlan, driver: ScrollDriver, delay?: Delay): Promise<void>;
+export declare function dispatchScrollPlan(plan: ScrollPlan, driver: ScrollDriver, delay?: Delay, clock?: Clock): Promise<void>;
 /**
  * Stateful pointer convenience wrapper. `click()` refuses to dispatch a click
  * when the live endpoint no longer resolves to an interactive element.

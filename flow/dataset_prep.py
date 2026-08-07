@@ -9,20 +9,20 @@ Each mouse gesture is mapped to a target-relative canonical frame:
 
   1. translate  : start point -> (0, 0)
   2. rotate     : endpoint direction -> +X axis
-  3. resample   : 129 points on a uniform *time* grid (linear interpolation)
-  4. difference : 128 spatial deltas per axis
+  3. resample   : 81 points on a uniform *time* grid (linear interpolation)
+  4. difference : 80 spatial deltas per axis
   5. scale      : divide spatial deltas by gesture distance
 
 Velocity information lives entirely in (du, dv) because the time grid is
 uniform: a fast segment produces a large spatial delta.
 
-DEGENERACY (why the model vector is 255-d, not 384-d)
+DEGENERACY (why the model vector is 159-d, not 161-d)
 -----------------------------------------------------
 Three exact constraints are induced by the normalization above:
 
-  * dt is identical for all 128 steps of every gesture (uniform time grid),
-    so after dividing by total duration it equals 1/128 *exactly*, for every
-    sample in the corpus. Zero variance -> 128 dead dimensions.
+  * dt is identical for all 80 steps of every gesture (uniform time grid),
+    so after dividing by total duration it equals 1/80 *exactly*, for every
+    sample in the corpus. Zero variance -> 80 dead dimensions.
   * sum(du) == 1.0 exactly (endpoint sits at +1 after scaling by distance).
   * sum(dv) == 0.0 exactly (endpoint sits on the +X axis after rotation).
 
@@ -31,12 +31,17 @@ density supported on a lower-dimensional manifold: the log-likelihood diverges
 and the spline scales collapse to NaN. So the redundant coordinates are
 dropped rather than modeled:
 
-    x = [ du[0..126] (127), dv[0..126] (127), log(duration_ms) (1) ]  -> 255
+    x = [ du except index 40 (79), dv except index 40 (79),
+          log(duration_ms) (1) ]  -> 159
 
-The dropped final deltas are recovered exactly at synthesis time:
+One middle delta per axis is dropped and recovered exactly at synthesis time:
 
-    du[127] = 1.0 - sum(du[0..126])
-    dv[127] = 0.0 - sum(dv[0..126])
+    du[40] = 1.0 - sum(du[all indices except 40])
+    dv[40] = 0.0 - sum(dv[all indices except 40])
+
+Dropping the final delta made touchdown velocity unmodeled and produced a large
+terminal-speed artifact. A middle coordinate satisfies the same mathematical
+constraint while keeping the observed first and final deltas in the density.
 
 Total duration becomes a *generated* quantity instead of a Fitts's-law output.
 That removes another hand-calibrated component and directly addresses
@@ -44,9 +49,9 @@ discriminator feature [7] (actual_duration / fitts_duration).
 
 Outputs
 -------
-x     : (N, 255) float32, standardized per dimension
-c     : (N, 2)   float32, standardized -- [log(distance), log(target_size)]
-meta  : (N, 3)   float32, raw          -- [distance_px, target_size_px, duration_ms]
+x     : (N, 159) float32, standardized per dimension
+c     : (N, 3)   float32, standardized -- [log(distance), log(target_size), terminal_stop]
+meta  : (N, 4)   float32, raw          -- [distance_px, target_size_px, duration_ms, terminal_stop]
 stats : mean/std tensors required to invert the standardization
 
 `meta` is unstandardized on purpose: the Phase 3 audit needs real gestures in
@@ -69,17 +74,15 @@ N_STEPS = 80   # spatial deltas per gesture; matches the native ~119 Hz capture
                # duration — 1.21× oversampling, minimal interpolation artifact.
                # N_STEPS=128 was 1.62× oversample and manufactured artificial
                # velocity spikes that corrupted every downstream measurement.
-N_FREE = N_STEPS - 1  # free deltas per axis after dropping the constrained tail
-MODEL_DIM = 2 * N_FREE + 1  # 95 du + 95 dv + 1 log-duration = 191
-MIN_DIST_PX = 20.0  # reject sub-threshold gestures (hover jitter, not aimed movement)
-MAX_DURATION_MS = 5000.0  # reject parked-pointer gestures (median 11 px/s past 10s)
-# Reject compound gestures: path length more than 1.5x the straight-line
-# distance means the pointer wandered or the segmenter merged several reaches
-# into one record. 10% of the corpus exceeds curvature 1.0 (path >2x direct),
-# which is not an aimed reach. Training on the mixture teaches the flow a
-# bimodal lateral distribution it then samples from incoherently.
-MAX_CURVATURE = 0.5
-MIN_POINTS = 4  # reject trajectories too short to interpolate meaningfully
+N_FREE = N_STEPS - 1  # free deltas per axis after dropping one constrained value
+DROPPED_DELTA_INDEX = N_STEPS // 2
+MODEL_DIM = 2 * N_FREE + 1  # 79 du + 79 dv + 1 log-duration = 159
+# Canonicalization divides by start-to-end displacement. A zero-displacement
+# record has no target axis and cannot enter this target-conditioned reach
+# model. It remains valid human evidence for discriminator training; this is a
+# representation boundary, not a behavioral quality filter.
+MIN_CANONICAL_DISTANCE_PX = 1e-6
+MIN_POINTS = 2  # minimum needed for a temporally measurable movement
 DEFAULT_TARGET_SIZE_PX = 24.0  # fallback when the capture bounding box is zeroed
 STD_FLOOR = 1e-6  # guard against divide-by-zero on near-constant dimensions
 
@@ -102,41 +105,61 @@ def resample_uniform(
     return xu, yu, total
 
 
-def process_movement(mov: dict) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+def process_movement(
+    mov: dict,
+) -> tuple[tuple[np.ndarray, np.ndarray, np.ndarray] | None, str | None]:
     """
-    Convert one RawMovement into (x, c, meta), or None when filtered out.
+    Convert one RawMovement into (x, c, meta).
 
-    x    : (255,) unstandardized model vector
-    c    : (2,)   unstandardized context -- [log(distance), log(target_size)]
-    meta : (3,)   raw scalars            -- [distance, target_size, duration_ms]
+    Genuine human behavior is never rejected for being short, slow, curved, or
+    compound. ``reason`` is populated only when the record cannot be measured
+    or represented by a target-directed canonical frame.
+
+    x    : (159,) unstandardized model vector
+    c    : (3,)   context -- [log(distance), log(target_size), terminal_stop]
+    meta : (4,)   raw -- [distance, target_size, duration_ms, terminal_stop]
     """
-    traj = mov.get("trajectory") or []
-    if len(traj) < MIN_POINTS:
-        return None
+    raw = mov.get("trajectory") or []
+    points: list[tuple[float, float, float]] = []
+    for point in raw:
+        if not isinstance(point, dict):
+            continue
+        try:
+            x, y, t = float(point["x"]), float(point["y"]), float(point["tMs"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if math.isfinite(x) and math.isfinite(y) and math.isfinite(t):
+            points.append((x, y, t))
+    if len(points) < MIN_POINTS:
+        return None, "fewer than 2 finite points"
 
-    raw_x = np.array([p["x"] for p in traj], dtype=np.float64)
-    raw_y = np.array([p["y"] for p in traj], dtype=np.float64)
-    raw_t = np.array([p["tMs"] for p in traj], dtype=np.float64)
+    # Preserve the measured path while repairing timestamp delivery artifacts.
+    # At an identical timestamp only the last coordinate is temporally
+    # observable, so it replaces the previous coordinate rather than causing
+    # the complete human movement to be thrown away.
+    points.sort(key=lambda point: point[2])
+    distinct: list[tuple[float, float, float]] = []
+    for point in points:
+        if distinct and point[2] == distinct[-1][2]:
+            distinct[-1] = point
+        else:
+            distinct.append(point)
+    if len(distinct) < MIN_POINTS:
+        return None, "fewer than 2 distinct timestamps"
 
-    # Timestamps relative to gesture start; np.interp requires sorted x-coords.
+    raw_x = np.array([point[0] for point in distinct], dtype=np.float64)
+    raw_y = np.array([point[1] for point in distinct], dtype=np.float64)
+    raw_t = np.array([point[2] for point in distinct], dtype=np.float64)
     raw_t = raw_t - raw_t[0]
-    if not np.all(np.diff(raw_t) >= 0):
-        order = np.argsort(raw_t, kind="stable")
-        raw_t, raw_x, raw_y = raw_t[order], raw_x[order], raw_y[order]
     duration_ms = float(raw_t[-1])
-    if duration_ms <= 0 or duration_ms > MAX_DURATION_MS:
-        return None
+    if duration_ms <= 0:
+        return None, "non-positive duration"
 
     dx = raw_x[-1] - raw_x[0]
     dy = raw_y[-1] - raw_y[0]
     dist = math.hypot(dx, dy)
-    if dist < MIN_DIST_PX:
-        return None
-
-    # Compound-gesture rejection (see MAX_CURVATURE).
-    path_len = float(np.hypot(np.diff(raw_x), np.diff(raw_y)).sum())
-    if path_len / dist - 1.0 > MAX_CURVATURE:
-        return None
+    if dist <= MIN_CANONICAL_DISTANCE_PX:
+        return None, "zero endpoint displacement"
 
     # Target size: min(width, height) is the Fitts-relevant extent along the
     # approach axis. 8.9% of captured gestures carry a zeroed bounding box.
@@ -158,19 +181,29 @@ def process_movement(mov: dict) -> tuple[np.ndarray, np.ndarray, np.ndarray] | N
     # Spatial deltas, scaled to unit distance. sum(du) == 1, sum(dv) == 0.
     delta_u = np.diff(xu) / dist
     delta_v = np.diff(yu) / dist
+    terminal_stop = float(math.hypot(delta_u[-1], delta_v[-1]) <= 1e-6)
 
-    # Drop the constrained tail delta on each axis (recovered at synthesis).
+    # Drop one constrained middle delta on each axis (recovered at synthesis).
+    # The final delta remains explicit so touchdown speed is learned.
     x_vec = np.concatenate(
-        [delta_u[:N_FREE], delta_v[:N_FREE], [math.log(duration_ms)]]
+        [
+            np.delete(delta_u, DROPPED_DELTA_INDEX),
+            np.delete(delta_v, DROPPED_DELTA_INDEX),
+            [math.log(duration_ms)],
+        ]
     ).astype(np.float32)
 
-    c_vec = np.array([math.log(dist), math.log(target_size)], dtype=np.float32)
-    meta = np.array([dist, target_size, duration_ms], dtype=np.float32)
+    c_vec = np.array(
+        [math.log(dist), math.log(target_size), terminal_stop], dtype=np.float32
+    )
+    meta = np.array(
+        [dist, target_size, duration_ms, terminal_stop], dtype=np.float32
+    )
 
     if not (np.all(np.isfinite(x_vec)) and np.all(np.isfinite(c_vec))):
-        return None
+        return None, "non-finite canonical representation"
 
-    return x_vec, c_vec, meta
+    return (x_vec, c_vec, meta), None
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -194,62 +227,46 @@ def main() -> None:
     xs: list[np.ndarray] = []
     cs: list[np.ndarray] = []
     metas: list[np.ndarray] = []
-    n_short_traj = n_short_dist = n_bad_time = n_long_dur = n_compound = 0
+    group_ids: list[str] = []
+    movement_ids: list[str] = []
+    unusable: dict[str, int] = {}
 
-    for mov in movements:
-        result = process_movement(mov)
+    for index, mov in enumerate(movements):
+        result, reason = process_movement(mov)
         if result is not None:
             x, c, meta = result
             xs.append(x)
             cs.append(c)
             metas.append(meta)
+            group_ids.append(str(mov.get("sessionId") or f"ungrouped-{index}"))
+            movement_ids.append(str(mov.get("id") or f"movement-{index}"))
             continue
-
-        # Attribute the rejection for the summary table.
-        traj = mov.get("trajectory") or []
-        if len(traj) < MIN_POINTS:
-            n_short_traj += 1
-        elif math.hypot(
-            traj[-1]["x"] - traj[0]["x"], traj[-1]["y"] - traj[0]["y"]
-        ) < MIN_DIST_PX:
-            n_short_dist += 1
-        elif traj[-1]["tMs"] - traj[0]["tMs"] > MAX_DURATION_MS:
-            n_long_dur += 1
-        else:
-            px = np.array([p["x"] for p in traj], float)
-            py = np.array([p["y"] for p in traj], float)
-            straight = math.hypot(px[-1] - px[0], py[-1] - py[0])
-            path = float(np.hypot(np.diff(px), np.diff(py)).sum())
-            if straight > 0 and path / straight - 1.0 > MAX_CURVATURE:
-                n_compound += 1
-            else:
-                n_bad_time += 1
+        key = reason or "unknown structural failure"
+        unusable[key] = unusable.get(key, 0) + 1
 
     if not xs:
-        sys.exit("No usable gestures after filtering -- check the capture format.")
+        sys.exit("No canonicalizable movements -- check the capture format.")
 
-    x_all = np.stack(xs)  # (N, 255)
+    x_all = np.stack(xs)  # (N, 159)
     c_all = np.stack(cs)  # (N, 2)
     meta_all = np.stack(metas)  # (N, 3)
 
-    print("\nFilter summary:")
-    print(f"  trajectory < {MIN_POINTS} points : {n_short_traj}")
-    print(f"  distance < {MIN_DIST_PX:g}px        : {n_short_dist}")
-    print(f"  duration > {MAX_DURATION_MS:g}ms       : {n_long_dur}")
-    print(f"  curvature > {MAX_CURVATURE:g}         : {n_compound}")
-    print(f"  non-positive duration / nan  : {n_bad_time}")
-    print(f"  kept                         : {len(xs)}")
+    print("\nPreservation summary:")
+    print(f"  canonicalized human movements : {len(xs)}")
+    for reason, count in sorted(unusable.items()):
+        print(f"  unrepresentable ({reason}) : {count}")
+    print("  behavioral filters (distance/duration/curvature) : 0")
 
     # Verify the constraints this parameterization claims to have removed.
     du_full_sum = x_all[:, :N_FREE].sum(axis=1)
     dv_full_sum = x_all[:, N_FREE : 2 * N_FREE].sum(axis=1)
-    print("\nConstraint check (tail deltas dropped, so these must NOT be constant):")
-    print(f"  sum(du[0..126]) std : {du_full_sum.std():.6f}")
-    print(f"  sum(dv[0..126]) std : {dv_full_sum.std():.6f}")
+    print("\nConstraint check (middle deltas dropped, so these must NOT be constant):")
+    print(f"  sum(du[0..{N_FREE - 1}]) std : {du_full_sum.std():.6f}")
+    print(f"  sum(dv[0..{N_FREE - 1}]) std : {dv_full_sum.std():.6f}")
 
     # Per-dimension standardization. Velocity profile means Δu at t=0 has a
-    # systematically different mean than at t=64, so per-dimension (not
-    # per-channel) statistics are the correct conditioning for a 255-d flow.
+    # systematically different mean than later samples, so per-dimension (not
+    # per-channel) statistics are the correct conditioning for this flow.
     x_mean = x_all.mean(axis=0)
     x_std = x_all.std(axis=0)
     n_floored = int((x_std < STD_FLOOR).sum())
@@ -262,7 +279,10 @@ def main() -> None:
     c_std = np.where(c_all.std(axis=0) < STD_FLOOR, 1.0, c_all.std(axis=0))
     c_norm = (c_all - c_mean) / c_std
 
-    print("\nModel vector: 127 du + 127 dv + 1 log-duration = " f"{x_all.shape[1]} dims")
+    print(
+        f"\nModel vector: {N_FREE} du + {N_FREE} dv + 1 log-duration = "
+        f"{x_all.shape[1]} dims"
+    )
     print(f"  du  std range : {x_std[:N_FREE].min():.6f} .. {x_std[:N_FREE].max():.6f}")
     print(
         f"  dv  std range : {x_std[N_FREE:2 * N_FREE].min():.6f} .. "
@@ -270,12 +290,14 @@ def main() -> None:
     )
     print(f"  log-duration  : mean {x_mean[-1]:.4f}  std {x_std[-1]:.4f}")
 
-    print("\nContext [log(distance), log(target_size)]:")
+    print("\nContext [log(distance), log(target_size), terminal_stop]:")
     print(f"  mean: {c_mean}")
     print(f"  std : {c_std}")
 
     print("\nRaw scalars (min / median / max):")
-    for i, name in enumerate(("distance_px", "target_size_px", "duration_ms")):
+    for i, name in enumerate(
+        ("distance_px", "target_size_px", "duration_ms", "terminal_stop")
+    ):
         col = meta_all[:, i]
         print(f"  {name:15s}: {col.min():9.2f} / {np.median(col):9.2f} / {col.max():9.2f}")
 
@@ -283,6 +305,8 @@ def main() -> None:
         "x": torch.from_numpy(x_norm.astype(np.float32)),
         "c": torch.from_numpy(c_norm.astype(np.float32)),
         "meta": torch.from_numpy(meta_all),
+        "group_ids": group_ids,
+        "movement_ids": movement_ids,
         "stats": {
             "x_mean": torch.from_numpy(x_mean.astype(np.float32)),
             "x_std": torch.from_numpy(x_std.astype(np.float32)),
@@ -292,10 +316,18 @@ def main() -> None:
         "layout": {
             "n_steps": N_STEPS,
             "n_free": N_FREE,
+            "dropped_delta_index": DROPPED_DELTA_INDEX,
             "model_dim": MODEL_DIM,
             "du": [0, N_FREE],
             "dv": [N_FREE, 2 * N_FREE],
             "log_duration": 2 * N_FREE,
+        },
+        "source": {
+            "capture": Path(args.capture).name,
+            "raw_movements": len(movements),
+            "canonicalized_movements": len(xs),
+            "unrepresentable": unusable,
+            "behavioral_filters": [],
         },
     }
 

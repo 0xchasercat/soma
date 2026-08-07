@@ -20,10 +20,13 @@ Synthetic negatives include:
 - white-noise jitter;
 - naïve smooth easing;
 - random waypoint paths.
+- WindMouse-style force simulation with integer quantization and fixed cadence;
+- all nine BeCAPTCHA-inspired combinations of linear/quadratic/exponential shape
+  and constant/accelerating/acceleration-deceleration velocity.
 
-Negative durations are sampled log-uniformly across the recorder's accepted 50–10,000 ms range; long constant-velocity paths are not left as an uncovered regime.
+Easy-negative durations are sampled log-uniformly across 50–10,000 ms, while captured human trajectories are not duration-filtered. Long constant-velocity paths are also evaluated by a dedicated promotion gate rather than being left as an uncovered regime.
 
-Human samples are grouped by capture session. A small training-only Soma calibration cohort is labeled human-like to keep the bundled scorer compatible with the library's own synthesis; it is excluded from validation/test metrics. Synthetic samples are grouped by generator family and deterministic batch. Training, validation, and test groups are disjoint. The test cohort is not used for checkpoint selection.
+Human samples are grouped by capture session. Soma synthesis is not part of the training corpus; it is scored only as a held-out promotion probe. Synthetic samples are grouped by generator family and deterministic batch. Training, validation, and test groups are disjoint. The test cohort is not used for checkpoint selection, and per-source test metrics make weak generator coverage visible.
 
 ## Train
 
@@ -39,7 +42,11 @@ bun run train:model -- \
 
 The command rejects invalid exports, un-attested legacy records, empty/one-class corpora, insufficient independent groups, and non-finite CLI values. Omit `--allow-legacy` for a purely v2 corpus. Output is written only after both the Soma self-consistency gate and the long-straight-negative gate pass. Metrics contain artifact basenames rather than local paths and include both gates, the canonical weight hash, feature schema, capture provenance, cohort sizes, validation/test confusion counts, and explicit limitations.
 
-The current benchmark is intentionally scoped: one operator, known synthetic families, and no third-party detector. Do not interpret a high test accuracy as evidence of population-level authenticity.
+The current benchmark is intentionally scoped: one operator, known synthetic families, and no third-party detector. The 12 aggregate inputs also discard temporal ordering that a sequence model can retain; high test accuracy therefore does not establish population-level authenticity.
+
+See [DATA_AUDIT.md](./DATA_AUDIT.md) for provenance, label-semantics, duplicate,
+split-leakage, and licensing decisions covering the external mouse and keystroke
+sources considered for this model.
 
 The 12 model inputs are derived only from trajectory geometry and timing. Target-box metadata is intentionally excluded so training, promotion, and path-only runtime scoring use identical information.
 

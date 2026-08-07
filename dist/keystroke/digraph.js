@@ -67,4 +67,33 @@ export const FLIGHT_TIME_PARAMS = {
  */
 export const HOLD_TIME_MEAN_MS = 80;
 export const HOLD_TIME_STD_MS = 25;
+/**
+ * Release-to-next-press (UD) timing calibrated from trusted privacy-safe capture.
+ *
+ * Negative UD means rollover: the next key is pressed before the previous key is
+ * released. Treating all inter-key timing as positive keydown-to-keydown latency
+ * severely underproduces a common human behavior, especially across hands.
+ */
+export const RELEASE_PRESS_PARAMS = {
+    'same-hand': {
+        overlapProbability: 0.171,
+        overlapMagnitude: { mu: Math.log(27.2), sigma: 0.72 },
+        nonOverlap: { mu: Math.log(97.1), sigma: 0.58 },
+    },
+    'cross-hand': {
+        overlapProbability: 0.485,
+        overlapMagnitude: { mu: Math.log(26.6), sigma: 0.82 },
+        nonOverlap: { mu: Math.log(34), sigma: 1.21 },
+    },
+    'after-space': {
+        overlapProbability: 0.426,
+        overlapMagnitude: { mu: Math.log(29.7), sigma: 0.8 },
+        nonOverlap: { mu: Math.log(82.1), sigma: 1.5 },
+    },
+    'after-punct': {
+        overlapProbability: 0.335,
+        overlapMagnitude: { mu: Math.log(22.3), sigma: 0.9 },
+        nonOverlap: { mu: Math.log(101.6), sigma: 1.56 },
+    },
+};
 //# sourceMappingURL=digraph.js.map

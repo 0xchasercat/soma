@@ -1,70 +1,185 @@
 {
   "schema": "soma.model-evaluation.v1",
   "featureSchema": "soma.motion-features.v2",
-  "modelSha256": "d920abadb1dd8e6dd3a35408672e2401e1edda15ca35ae75e4214db8c8fa4d9b",
+  "modelSha256": "11977a0016cb39a71390a528b04c9d62000a4eb00d4b1413c5fc8d5f4c890450",
   "captureSchemas": [
     "soma.capture.v2",
     "soma.capture.v1"
   ],
   "captureFiles": [
-    "soma-capture-2026-08-04T13-56-13.json"
+    "soma-capture-2026-08-06T21-45-52.json"
   ],
   "legacyAttestation": {
-    "flagProvided": true,
-    "acceptedCaptureFiles": [
-      "soma-capture-2026-08-04T13-56-13.json"
-    ]
+    "flagProvided": false,
+    "acceptedCaptureFiles": []
   },
   "seed": 42,
-  "epochs": 30,
-  "learningRate": 0.0006,
-  "batchSize": 64,
+  "epochs": 50,
+  "learningRate": 0.001,
+  "batchSize": 128,
   "dataset": {
-    "capturedHuman": 23252,
-    "easyNegatives": 23252,
-    "hardNegatives": 23227,
+    "capturedHuman": 36038,
+    "easyNegatives": 36038,
+    "hardNegatives": 36016,
     "somaInTraining": false
   },
   "validation": {
-    "loss": 0.03784442680433616,
-    "accuracy": 0.9875968992248062,
-    "trueHuman": 3197,
-    "falseBot": 69,
-    "falseHuman": 59,
-    "trueBot": 6995
+    "loss": 0.03321089865869233,
+    "accuracy": 0.9882832115159292,
+    "trueHuman": 7360,
+    "falseBot": 132,
+    "falseHuman": 78,
+    "trueBot": 10353
   },
   "test": {
-    "loss": 0.03663615828544118,
-    "accuracy": 0.9888785912882299,
-    "trueHuman": 2753,
-    "falseBot": 66,
-    "falseHuman": 42,
-    "trueBot": 6850
+    "loss": 0.03630311375617278,
+    "accuracy": 0.9878259794833766,
+    "trueHuman": 5342,
+    "falseBot": 118,
+    "falseHuman": 79,
+    "trueBot": 10643
   },
   "humanReference": {
-    "count": 2819,
-    "meanBotScore": 0.03169303348717913,
-    "maxBotScore": 0.9999425161235717,
-    "botRate": 0.023412557644554806
+    "count": 5460,
+    "meanBotScore": 0.02806321701464449,
+    "maxBotScore": 0.9991267465088043,
+    "botRate": 0.02161172161172161
+  },
+  "testBySource": {
+    "becaptcha_exponential_accelerating": {
+      "count": 320,
+      "meanBotScore": 0.9996275589268613,
+      "maxBotScore": 0.9999992890086596,
+      "botRate": 1
+    },
+    "becaptcha_exponential_bell": {
+      "count": 473,
+      "meanBotScore": 0.999900782129348,
+      "maxBotScore": 0.9999999999978055,
+      "botRate": 1
+    },
+    "becaptcha_exponential_constant": {
+      "count": 319,
+      "meanBotScore": 0.9977785251411695,
+      "maxBotScore": 0.9999910748257919,
+      "botRate": 1
+    },
+    "becaptcha_linear_accelerating": {
+      "count": 373,
+      "meanBotScore": 0.9918214067274677,
+      "maxBotScore": 0.9999666586436805,
+      "botRate": 1
+    },
+    "becaptcha_linear_bell": {
+      "count": 413,
+      "meanBotScore": 0.9999729066483108,
+      "maxBotScore": 0.9999999954415051,
+      "botRate": 1
+    },
+    "becaptcha_linear_constant": {
+      "count": 400,
+      "meanBotScore": 0.9883960727972634,
+      "maxBotScore": 0.9999888490662572,
+      "botRate": 1
+    },
+    "becaptcha_quadratic_accelerating": {
+      "count": 600,
+      "meanBotScore": 0.9986073851003592,
+      "maxBotScore": 0.9999995101736131,
+      "botRate": 1
+    },
+    "becaptcha_quadratic_bell": {
+      "count": 353,
+      "meanBotScore": 0.9999926448580293,
+      "maxBotScore": 0.9999999999881262,
+      "botRate": 1
+    },
+    "becaptcha_quadratic_constant": {
+      "count": 500,
+      "meanBotScore": 0.9982843207133859,
+      "maxBotScore": 0.9999978422970942,
+      "botRate": 1
+    },
+    "bezmouse": {
+      "count": 693,
+      "meanBotScore": 0.9852325070530268,
+      "maxBotScore": 0.9999999878743685,
+      "botRate": 0.9884559884559885
+    },
+    "constant_velocity": {
+      "count": 1095,
+      "meanBotScore": 0.9945986982193852,
+      "maxBotScore": 0.9999934367963669,
+      "botRate": 0.9981735159817352
+    },
+    "ghost_cursor": {
+      "count": 219,
+      "meanBotScore": 0.9865503777985288,
+      "maxBotScore": 0.999999964740438,
+      "botRate": 0.9908675799086758
+    },
+    "human_cursor": {
+      "count": 440,
+      "meanBotScore": 0.9902423620653217,
+      "maxBotScore": 0.9999948655812189,
+      "botRate": 0.9977272727272727
+    },
+    "human-v2-trusted": {
+      "count": 5460,
+      "meanBotScore": 0.02806321701464449,
+      "maxBotScore": 0.9991267465088043,
+      "botRate": 0.02161172161172161
+    },
+    "naive_ease": {
+      "count": 1047,
+      "meanBotScore": 0.9977878320115039,
+      "maxBotScore": 0.9999999842177052,
+      "botRate": 0.9990448901623686
+    },
+    "random_waypoints": {
+      "count": 1016,
+      "meanBotScore": 0.9865901970565827,
+      "maxBotScore": 0.9999999999659699,
+      "botRate": 0.9901574803149606
+    },
+    "straight_line": {
+      "count": 1016,
+      "meanBotScore": 0.9924400612803775,
+      "maxBotScore": 0.9999991988252093,
+      "botRate": 0.9970472440944882
+    },
+    "white_noise": {
+      "count": 1145,
+      "meanBotScore": 0.9496433065626987,
+      "maxBotScore": 0.999999937994461,
+      "botRate": 0.965938864628821
+    },
+    "windmouse": {
+      "count": 300,
+      "meanBotScore": 0.9478634193917755,
+      "maxBotScore": 0.9999924506028862,
+      "botRate": 0.9566666666666667
+    }
   },
   "somaProbe": {
     "count": 400,
-    "meanBotScore": 0.035843114825385367,
-    "maxBotScore": 0.7112182337922942,
-    "botRate": 0.02
+    "meanBotScore": 0.02593595887595941,
+    "maxBotScore": 0.9044508664249182,
+    "botRate": 0.03
   },
-  "somaHumanMeanRatio": 1.1309461696017542,
+  "somaHumanMeanRatio": 0.9241976378697071,
   "negativeConsistency": {
     "count": 100,
-    "meanBotScore": 0.9999994838935823,
-    "maxBotScore": 0.9999996769760033,
+    "meanBotScore": 0.9999205587394298,
+    "maxBotScore": 0.9999486795933443,
     "botRate": 1
   },
   "limitations": [
     "Human data represents one operator and is not population-level ground truth.",
     "Soma is excluded from training and scored as a held-out probe; its bot-rate is compared against held-out real humans rather than an absolute floor.",
-    "Hard negatives are faithful reimplementations of published library algorithms, not the vendored libraries themselves.",
+    "Hard negatives are independent behavior-level implementations of published generator families, not vendored library source.",
     "Synthetic test groups use the same generator families as training groups.",
+    "The 12 aggregate features discard temporal ordering; this classifier is not a sequence-model fidelity claim.",
     "Pointer-only: the 12 features are trajectory geometry. Keystroke and scroll evidence are gated separately and are not model inputs."
   ]
 }

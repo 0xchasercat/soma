@@ -351,7 +351,9 @@ function endTrajectoryCapture(e?: MouseEvent): void {
   const interactive = interactiveAncestor(hit);
   const target = interactive ?? (hit instanceof HTMLElement ? hit : null);
   resetTrajectory();
-  if (trajectory.length < 5) return;
+  // Preserve sparse but genuine trusted movements. Downstream measurement can
+  // extract a finite feature vector from two temporally distinct samples.
+  if (trajectory.length < 2) return;
 
   const rect = target?.getBoundingClientRect();
   const width = rect?.width ?? 0;

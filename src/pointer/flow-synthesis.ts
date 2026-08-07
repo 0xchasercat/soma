@@ -2,38 +2,23 @@
  * Flow-based pointer synthesis.
  *
  * Replaces the parametric Bezier + Fitts + overshoot pipeline with a sample
- * from a conditional normalizing flow trained on 19,755 real captured gestures
- * (see flow/train_flow.py). The flow models
+ * from a conditional normalizing flow trained on captured human gestures (see
+ * flow/train_flow.py). The flow models
  *
- *     p( du[0..126], dv[0..126], log(duration_ms) | log(distance), log(target_size) )
+ *     p( 79 free du, 79 free dv, log(duration_ms)
+ *        | log(distance), log(target_size), terminal_stop )
  *
  * in a canonical target-relative frame: start at the origin, endpoint on the
- * +X axis at unit distance, 129 points on a uniform time grid.
+ * +X axis at unit distance, 81 points on a uniform time grid.
  *
- * Why this beats the parametric path
- * ----------------------------------
- * Overshoot rate, peak-velocity timing and velocity-profile shape are learned
- * jointly from data instead of being hand-tuned one constant at a time. The
- * Phase 3 audit measured discriminator separability dropping from 91.1% to
- * 31.6% (overshoot), 87.3% to 29.5% (peak timing) and 84.7% to 0.0%
- * (bell profile).
+ * Geometry, velocity, and duration are learned jointly rather than being tuned
+ * one constant at a time. Current claims come only from the session-held-out
+ * audit; historical hard-coded comparisons are not runtime guarantees.
  *
- * Post-processing is NOT cosmetic
- * -------------------------------
- * The same audit found three defects the raw samples do not fix on their own,
- * each of which is independently a detection signal:
- *
- *   1. terminal velocity   — raw samples land at 72% of peak speed; real
- *                            gestures land at 0.4%. A cursor that arrives at
- *                            full speed and stops dead is not physical.
- *   2. submovement count    — raw samples show ~40 speed reversals against a
- *                            real ~13, because per-timestep spline noise reads
- *                            as high-frequency chatter.
- *   3. lateral tremor band  — raw high-frequency lateral energy is ~9x real.
- *
- * `applyDecelerationTaper` and `smoothLateral` below correct 1-3 in the
- * reconstruction, which is the same code path the Phase 3 audit measures, so
- * the numbers reported there describe what actually ships.
+ * Samples are not rejected for resembling a synthetic generator. A genuine
+ * human distribution includes straight, slow, corrective, and otherwise
+ * automation-like tails; scorer-guided redraws would censor those tails and
+ * make the shipped distribution cleaner than the source population.
  *
  * Determinism
  * -----------
@@ -52,14 +37,12 @@ import type {
 import { RNG } from '../rng.js';
 import { mergeProfile } from '../profile.js';
 import { dist2D, preMoveSettle, sampleEndpoint, clickHoldTime } from './fitts.js';
-import { addTremor } from './tremor.js';
-import { scoreTrajectory } from '../score/index.js';
 
 // ─── Artifact contract ────────────────────────────────────────────────────────
 
 /** Normalization constants and layout emitted by flow/export_stats.py. */
 export interface FlowStats {
-  schemaVersion: number;
+  schemaVersion: 2;
   arch: {
     dataDim: number;
     contextDim: number;
@@ -70,6 +53,7 @@ export interface FlowStats {
   layout: {
     nSteps: number;
     nFree: number;
+    droppedDeltaIndex: number;
     duStart: number;
     dvStart: number;
     logDurationIndex: number;
@@ -79,6 +63,10 @@ export interface FlowStats {
     xStd: number[];
     cMean: number[];
     cStd: number[];
+  };
+  postprocess: {
+    terminalStopProbability: number;
+    terminalStopEpsilon: number;
   };
   bestValNll: number;
 }
@@ -112,6 +100,10 @@ export interface FlowModel {
 /** Throw unless the stats artifact is internally consistent. */
 export function validateFlowStats(stats: FlowStats): void {
   const { arch, layout, stats: s } = stats;
+  if (stats.schemaVersion !== 2)
+    throw new Error(`flow stats: unsupported schemaVersion ${String(stats.schemaVersion)}; expected 2`);
+  if (arch.contextDim !== 3)
+    throw new Error(`flow stats: contextDim ${arch.contextDim} != schema-v2 contextDim 3`);
   if (s.xMean.length !== arch.dataDim || s.xStd.length !== arch.dataDim)
     throw new Error(`flow stats: xMean/xStd length != dataDim ${arch.dataDim}`);
   if (s.cMean.length !== arch.contextDim || s.cStd.length !== arch.contextDim)
@@ -120,6 +112,14 @@ export function validateFlowStats(stats: FlowStats): void {
     throw new Error(`flow stats: layout 2*${layout.nFree}+1 != dataDim ${arch.dataDim}`);
   if (layout.logDurationIndex !== arch.dataDim - 1)
     throw new Error('flow stats: logDurationIndex must be the final dimension');
+  if (!Number.isInteger(layout.droppedDeltaIndex) ||
+      layout.droppedDeltaIndex < 0 || layout.droppedDeltaIndex >= layout.nSteps)
+    throw new Error('flow stats: droppedDeltaIndex must address a spatial delta');
+  if (!(stats.postprocess?.terminalStopProbability >= 0 &&
+        stats.postprocess.terminalStopProbability <= 1))
+    throw new Error('flow stats: terminalStopProbability must be in [0, 1]');
+  if (!(stats.postprocess.terminalStopEpsilon > 0))
+    throw new Error('flow stats: terminalStopEpsilon must be positive');
   for (const v of s.xStd) if (!(v > 0)) throw new Error('flow stats: xStd must be strictly positive');
   for (const v of s.cStd) if (!(v > 0)) throw new Error('flow stats: cStd must be strictly positive');
 }
@@ -158,38 +158,27 @@ export async function loadFlowModel(options: {
 const FRAME_HZ = 60;
 
 /**
- * Surrogate-scorer value at or above which a sampled gesture is redrawn.
- *
- * Matches the detector threshold the gate uses. Measured over 351 flow
- * gestures: 18% score >= 0.8 while real hands do so on 5.1%, and those samples
- * concentrate in one region (median 1376 ms duration at arc/straight 1.056 —
- * slow, nearly straight reaches) that the corpus supports but only sparsely.
+ * Prevent retained long-duration human records from allocating an unbounded
+ * output array. The elapsed duration is preserved; only the dispatch sampling
+ * interval becomes adaptive above this limit.
  */
-const REJECTION_SCORE_MAX = 0.8;
-
-/**
- * Maximum flow draws per gesture, including the first.
- *
- * Draws are independent, so a 0.18 per-draw rejection rate leaves 0.18^4 ≈ 0.1%
- * of gestures still flagged after four attempts. Bounded so a pathological
- * context cannot spin: the final draw is used whether or not it passes.
- */
-const REJECTION_ATTEMPTS = 4;
+export const MAX_DISPATCH_FRAMES = 4096;
 
 /**
  * Resample a canonical-frame path onto a fixed frame interval.
  *
- * The flow emits 129 points on its own uniform grid; dispatch needs samples at
+ * The flow emits 81 points on its own uniform grid; dispatch needs samples at
  * the frame rate the pointer actually reports at.
  */
-function resampleToFrameRate(
+export function resampleToFrameRate(
   u: Float64Array,
   v: Float64Array,
   t: Float64Array,
   frameMs: number,
 ): { u: Float64Array; v: Float64Array; t: Float64Array } {
   const total = t[t.length - 1]!;
-  const frames = Math.max(2, Math.round(total / frameMs) + 1);
+  const desiredFrames = Math.round(total / frameMs) + 1;
+  const frames = Math.max(2, Math.min(MAX_DISPATCH_FRAMES, desiredFrames));
   const ru = new Float64Array(frames);
   const rv = new Float64Array(frames);
   const rt = new Float64Array(frames);
@@ -218,27 +207,33 @@ function resampleToFrameRate(
 export function reconstructGesture(
   xStandardized: Float32Array,
   stats: FlowStats,
+  forceTerminalStop = false,
 ): { u: Float64Array; v: Float64Array; t: Float64Array; durationMs: number } {
   const { xMean, xStd } = stats.stats;
-  const { nFree, nSteps, duStart, dvStart, logDurationIndex } = stats.layout;
+  const { nFree, nSteps, droppedDeltaIndex, duStart, dvStart, logDurationIndex } = stats.layout;
 
   const du = new Float64Array(nSteps);
   const dv = new Float64Array(nSteps);
 
   let duSum = 0;
   let dvSum = 0;
-  for (let i = 0; i < nFree; i++) {
-    const a = xStandardized[duStart + i]! * xStd[duStart + i]! + xMean[duStart + i]!;
-    const b = xStandardized[dvStart + i]! * xStd[dvStart + i]! + xMean[dvStart + i]!;
-    du[i] = a;
-    dv[i] = b;
-    duSum += a;
-    dvSum += b;
+  let freeIndex = 0;
+  for (let step = 0; step < nSteps; step++) {
+    if (step === droppedDeltaIndex) continue;
+    const a = xStandardized[duStart + freeIndex]! * xStd[duStart + freeIndex]! + xMean[duStart + freeIndex]!;
+    const b = xStandardized[dvStart + freeIndex]! * xStd[dvStart + freeIndex]! + xMean[dvStart + freeIndex]!;
+    const modeledU = forceTerminalStop && step === nSteps - 1 ? 0 : a;
+    const modeledV = forceTerminalStop && step === nSteps - 1 ? 0 : b;
+    du[step] = modeledU;
+    dv[step] = modeledV;
+    duSum += modeledU;
+    dvSum += modeledV;
+    freeIndex++;
   }
-  // Restore the deltas dataset_prep dropped: the canonical frame pins the
-  // endpoint at (1, 0), so the tails are determined, not free.
-  du[nSteps - 1] = 1 - duSum;
-  dv[nSteps - 1] = -dvSum;
+  // Restore the omitted middle deltas. The canonical endpoint constraints make
+  // them determined while leaving the measured touchdown deltas explicit.
+  du[droppedDeltaIndex] = 1 - duSum;
+  dv[droppedDeltaIndex] = -dvSum;
 
   const durationMs = Math.exp(
     xStandardized[logDurationIndex]! * xStd[logDurationIndex]! + xMean[logDurationIndex]!,
@@ -299,9 +294,9 @@ export async function synthesizeMovementFlow(
   const distance = dist2D(safeStart, endpoint);
   const targetSize = Math.max(1, Math.min(safeTarget.width, safeTarget.height));
 
-  // Degenerate reach: the flow is trained on >= 20px gestures and the canonical
-  // frame divides by distance, so a sub-pixel move has no valid normalization.
-  if (distance < 1) {
+  // Only a zero-displacement reach is non-canonical. Short human corrections
+  // remain in training and must not be routed away from the learned density.
+  if (distance <= 1e-6) {
     const points: TrajectoryPoint[] = [
       { x: safeStart.x, y: safeStart.y, tMs: 0 },
       { x: endpoint.x, y: endpoint.y, tMs: 16 },
@@ -312,15 +307,20 @@ export async function synthesizeMovementFlow(
   const { dataDim, contextDim } = model.stats.arch;
   const { cMean, cStd } = model.stats.stats;
 
+  // Exact stationary touchdown is a discrete human state, not a value a
+  // continuous density can represent. Sample it first and condition the flow
+  // on the selected regime so moving-touchdown samples learn their own tail.
+  const forceTerminalStop = rng.next() < model.stats.postprocess.terminalStopProbability;
+
   const context = new Float32Array(contextDim);
   context[0] = (Math.log(distance) - cMean[0]!) / cStd[0]!;
   context[1] = (Math.log(targetSize) - cMean[1]!) / cStd[1]!;
+  context[2] = ((forceTerminalStop ? 1 : 0) - cMean[2]!) / cStd[2]!;
 
   const theta = Math.atan2(endpoint.y - safeStart.y, endpoint.x - safeStart.x);
   const cos = Math.cos(theta);
   const sin = Math.sin(theta);
   const frameMs = 1000 / FRAME_HZ;
-  const tremorAmplitude = Number.isFinite(p.tremor) ? Math.max(0, p.tremor) : 0;
   const durationScale = 1 / Math.max(0.2, Math.min(3, p.speed));
 
   /** One draw from the flow, mapped into the viewport with tremor applied. */
@@ -344,7 +344,7 @@ export async function synthesizeMovementFlow(
       }
     }
 
-    const canonical = reconstructGesture(xOut, model.stats);
+    const canonical = reconstructGesture(xOut, model.stats, forceTerminalStop);
     const personaTime = Float64Array.from(canonical.t, (value) => value * durationScale);
     const resampled = resampleToFrameRate(canonical.u, canonical.v, personaTime, frameMs);
 
@@ -366,35 +366,22 @@ export async function synthesizeMovementFlow(
     // click target by a fraction of a pixel.
     points[0] = { x: safeStart.x, y: safeStart.y, tMs: 0 };
     points[n - 1] = { x: endpoint.x, y: endpoint.y, tMs: resampled.t[n - 1]! };
+    if (forceTerminalStop && n > 2) {
+      // A canonical stop occupies only 1/80 of the duration and can disappear
+      // when resampled to 60 Hz. Reserve the last dispatch interval for the
+      // measured stationary mouseup state instead of losing the discrete atom.
+      points[n - 2] = { x: endpoint.x, y: endpoint.y, tMs: resampled.t[n - 2]! };
+    }
 
-    // Physiological tremor is applied here rather than learned: the audit showed
-    // the flow's own high-frequency lateral energy has the wrong spectrum, while
-    // the AR(2) oscillator in tremor.ts is fitted to the measured residual ACF.
     return {
-      points: addTremor(points, tremorAmplitude, rng),
-      durationMs: canonical.t[canonical.t.length - 1]!,
+      // The flow is trained on complete captured microstructure. Adding the
+      // legacy AR(2) oscillator a second time increased held-out separability.
+      points,
+      durationMs: resampled.t[resampled.t.length - 1]!,
     };
   };
 
-  // Rejection sampling. The flow places ~17% of its mass on a region real hands
-  // occupy ~5% of the time (slow, near-straight reaches), and the surrogate
-  // scorer flags exactly those. Redrawing z re-samples that gesture from the
-  // same conditional density, so rejecting the flagged tail reshapes the
-  // sampling distribution toward the corpus without touching the model.
-  // Rejections are independent, so REJECTION_ATTEMPTS = 4 leaves a ~0.1%
-  // residual; the last draw is returned regardless so a gesture is always
-  // produced, and scoring failures degrade to accepting the first draw.
-  let chosen = await attempt();
-  for (let tries = 1; tries < REJECTION_ATTEMPTS; tries++) {
-    let score: number;
-    try {
-      score = await scoreTrajectory(chosen.points);
-    } catch {
-      break;
-    }
-    if (score < REJECTION_SCORE_MAX) break;
-    chosen = await attempt();
-  }
+  const chosen = await attempt();
 
   return {
     points: chosen.points,

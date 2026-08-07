@@ -48,7 +48,11 @@ function normalizedTrajectory(path: unknown, legacy: boolean): TrajectoryPoint[]
     .filter((point): point is TrajectoryPoint => point !== null && typeof point === 'object' &&
       finite((point as TrajectoryPoint).x) && finite((point as TrajectoryPoint).y) && finite((point as TrajectoryPoint).tMs))
     .sort((a, b) => a.tMs - b.tMs);
-  if (clean.length < 10) return null;
+  // A human trajectory is not invalid merely because it is short, slow, or
+  // sparsely sampled. Two finite samples at distinct times are sufficient for
+  // the canonical feature extractor; richer features naturally fall back to
+  // their finite neutral values when the path is too short to measure them.
+  if (clean.length < 2) return null;
 
   let start = 0;
   if (legacy) {
@@ -59,11 +63,13 @@ function normalizedTrajectory(path: unknown, legacy: boolean): TrajectoryPoint[]
     }
   }
   const burst = trimStationaryTail(clean.slice(start));
-  if (burst.length < 10) return null;
+  if (burst.length < 2) return null;
   const origin = burst[0]!.tMs;
   const normalized = burst.map((point) => ({ x: point.x, y: point.y, tMs: point.tMs - origin }));
   const duration = normalized[normalized.length - 1]!.tMs;
-  return duration >= 50 && duration <= 10_000 ? normalized : null;
+  // Duration limits used to censor legitimate human hesitations and very fast
+  // corrections. Only a non-positive time span is structurally unmeasurable.
+  return duration > 0 ? normalized : null;
 }
 
 /** Load and minimally validate a capture export before training. */

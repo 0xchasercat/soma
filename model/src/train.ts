@@ -496,6 +496,22 @@ function evaluateHeldOutHumans(model: Model, samples: TrainingSample[]): SelfCon
   };
 }
 
+function evaluateBySource(model: Model, samples: TrainingSample[]): Record<string, SelfConsistency> {
+  const grouped = new Map<string, number[]>();
+  for (const sample of samples) {
+    const scores = grouped.get(sample.source) ?? [];
+    scores.push(forward(sample.features, model).out);
+    grouped.set(sample.source, scores);
+  }
+  return Object.fromEntries([...grouped.entries()].sort(([left], [right]) => left.localeCompare(right))
+    .map(([source, scores]) => [source, {
+      count: scores.length,
+      meanBotScore: scores.reduce((sum, score) => sum + score, 0) / scores.length,
+      maxBotScore: Math.max(...scores),
+      botRate: scores.filter((score) => score >= 0.5).length / scores.length,
+    }]));
+}
+
 function evaluateLongStraightNegatives(model: Model, count = 100): SelfConsistency {
   const scores: number[] = [];
   for (let index = 0; index < count; index++) {
@@ -613,9 +629,13 @@ async function main() {
   const capturedHumanCount = dataset.filter((sample) => sample.label === 0).length;
   const botCount = dataset.filter((sample) => sample.label === 1).length;
   const hardCount = dataset.filter((sample) => sample.groupId.startsWith('hard-')).length;
+  const hardSources = [...new Set(dataset
+    .filter((sample) => sample.groupId.startsWith('hard-'))
+    .map((sample) => sample.source))].sort();
   if (capturedHumanCount === 0 || botCount === 0) throw new Error('Training requires non-empty human and bot classes');
   console.log(`Dataset: ${dataset.length} samples (${capturedHumanCount} captured human, ` +
-    `${botCount - hardCount} easy negatives, ${hardCount} hard negatives [ghost-cursor/bezmouse/HumanCursor]), seed=${seed}`);
+    `${botCount - hardCount} easy negatives, ${hardCount} hard negatives ` +
+    `[${hardSources.join('/')}]), seed=${seed}`);
   console.log('Soma output is NOT in the dataset — it is scored only as a held-out probe.');
 
   console.log(`Training: epochs=${epochs} lr=${learningRate} batch=${batchSize}`);
@@ -626,6 +646,7 @@ async function main() {
   // the comparison — not Soma's absolute score — is the acceptance criterion.
   const selfConsistency = evaluateSomaPlans(result.model, seed + 10_000);
   const humanReference = evaluateHeldOutHumans(result.model, result.testSet);
+  const testBySource = evaluateBySource(result.model, result.testSet);
   console.log(`Held-out real humans: mean_bot_score=${humanReference.meanBotScore.toFixed(4)}` +
     ` bot_rate=${(humanReference.botRate * 100).toFixed(1)}% (n=${humanReference.count})`);
   console.log(`Soma (held out of training): mean_bot_score=${selfConsistency.meanBotScore.toFixed(4)}` +
@@ -679,14 +700,16 @@ async function main() {
     validation: result.validation,
     test: result.test,
     humanReference,
+    testBySource,
     somaProbe: selfConsistency,
     somaHumanMeanRatio: Number.isFinite(meanRatio) ? meanRatio : null,
     negativeConsistency,
     limitations: [
       'Human data represents one operator and is not population-level ground truth.',
       'Soma is excluded from training and scored as a held-out probe; its bot-rate is compared against held-out real humans rather than an absolute floor.',
-      'Hard negatives are faithful reimplementations of published library algorithms, not the vendored libraries themselves.',
+      'Hard negatives are independent behavior-level implementations of published generator families, not vendored library source.',
       'Synthetic test groups use the same generator families as training groups.',
+      'The 12 aggregate features discard temporal ordering; this classifier is not a sequence-model fidelity claim.',
       'Pointer-only: the 12 features are trajectory geometry. Keystroke and scroll evidence are gated separately and are not model inputs.',
     ],
   }, null, 2));
